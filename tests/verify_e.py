@@ -93,4 +93,12 @@ o = run({"country": "AU", "today": "2026-10-21", "rules": rule(auf),
 check("E7a AU 常旅客 → 90 天", o["single"]["effective_days"] == 90, f"got={o['single']['effective_days']}")
 check("E7b AU 最晚离境 12-29", o["single"]["last_allowed_day"] == "2026-12-29", o["single"]["last_allowed_day"])
 
+# E8 菲律宾持美签免签：取保守 7 天（页面写可延至 21 天，高报会害用户超期）
+php = next(t for t in ext["countries"]["PH"]["types"] if t["id"] == "ph-7day-ajacssuk")
+o = run({"country": "PH", "today": "2026-10-21", "rules": rule(php),
+         "trips": [{"country": "PH", "entry": "2026-10-15", "exit": None}],
+         "visa_type": php["type"], "visa_source": "extended"})
+check("E8a PH 持美签 → 7 天", o["single"]["effective_days"] == 7, f"got={o['single']['effective_days']}")
+check("E8b PH 最晚离境 10-21（含入境当日）", o["single"]["last_allowed_day"] == "2026-10-21", o["single"]["last_allowed_day"])
+
 print(f"\n{len(fails)} 失败"); sys.exit(1 if fails else 0)
