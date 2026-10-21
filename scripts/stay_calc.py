@@ -34,7 +34,9 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
   "as_of": null,                         // 可选：评估日（未来入境场景传计划入境日），默认 today
   "visa_type": "旅游签",                 // 可选：用户签证类型（旅游/商务/探亲/留学/其他）
   "visa_source": "dataset",              // 可选：dataset=快照值 / user=签证页单值 / user_rules=用户结构化整套
-                                         //       / extended=扩展表(visa-types-extended.bin)命中 / web=联网检索
+                                         //       / extended=扩展表(visa-types-extended.bin)命中
+                                         //       / aggregated=聚合表(visa-types-aggregated.bin)命中，恒 low
+                                         //       / web=联网检索
   "visa_days": null,                     // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
   "reported_days": null,                 // 可选：用户口述的"已待总天数"（用于与行程日期交叉校验）
   "rules_source": null,                  // 可选：规则来源声明（user_rules/web），缺省随 visa_source 推断
@@ -44,9 +46,9 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
 输出（stdout JSON）：含 `bottom_line`（一句话结论，AI 必须直接引用此字段向用户播报，
 禁止自行从 effective_days/remaining_days 挑数字——两字段语义相近极易拿错）；
 含 `confidence` 字段，取值：
-- "high"：用户提供了签证页数字（visa_source="user"）
-- "medium"：用户确认签证类型与 dataset 匹配
-- "low"：用户说不清签证类型，用 dataset 值
+- "high"：用户提供了签证页数字（visa_source="user"）或命中原生扩展表（extended）
+- "medium"：用户确认签证类型与 dataset 匹配 / 联网检索到官方页面
+- "low"：用户说不清签证类型用 dataset 值 / 命中聚合表（aggregated，未逐条官方核验）
 - "none"：用户签证类型与 dataset 不匹配
 
 """
@@ -177,25 +179,28 @@ def run(payload):
 
     # 签证来源与置信度
     # visa_source: dataset=快照值 / user=签证页单值 / user_rules=用户结构化整套
-    #              / extended=扩展表命中 / web=联网检索
+    #              / extended=扩展表命中 / aggregated=聚合表命中(confidence=low) / web=联网检索
     visa_source = payload.get('visa_source', 'dataset')
     visa_days = payload.get('visa_days')  # 用户签证页数字（覆盖 rules.stay_single）
     visa_type = payload.get('visa_type', '')  # 用户签证类型（用于置信度判断）
     # rules 来源：结构化录入/扩展表/联网检索时，调用方（模型）在此声明，输出如实透传
     rules_source = payload.get('rules_source') or (
         'user_rules' if visa_source == 'user_rules'
-        else ('extended' if visa_source == 'extended'
-              else ('web' if visa_source == 'web' else 'dataset')))
+        else ('aggregated' if visa_source == 'aggregated'
+              else ('extended' if visa_source == 'extended'
+                    else ('web' if visa_source == 'web' else 'dataset'))))
 
     # 用户签证页数字覆盖 dataset 值
     if visa_days and visa_days > 0:
         single = int(visa_days)
-        if visa_source not in ('user_rules', 'extended', 'web'):
+        if visa_source not in ('user_rules', 'extended', 'aggregated', 'web'):
             visa_source = 'user'
 
     # 置信度判定
     if visa_source in ('user', 'user_rules', 'extended'):
         confidence = 'high'
+    elif visa_source == 'aggregated':
+        confidence = 'low'  # 聚合表未逐条官方核验，恒 low（见 visa-types-aggregated._meta）
     elif visa_source == 'web':
         confidence = 'medium'  # 联网检索到官方页面也不及用户签证页可靠，恒 medium
     elif visa_type and visa_type.strip():

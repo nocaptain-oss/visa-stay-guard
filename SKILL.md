@@ -14,6 +14,10 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
   入境方式、执法口径、超期处罚条款），**每条带官方来源链接**（sourceName/sourceUrl）与
   数据日期（updatedAt）——来源全部为 official/government 级。
 - 快照派生自 VisaDay AI 应用云管道核验数据（版本见 `_meta.snapshot_version`）。
+- **两级类型表**：`visa-types-extended.bin`（官方页面实抓核验，`tier=official`）与
+  `visa-types-aggregated.bin`（AI 聚合整理，`tier=aggregated`、`confidence=low`）。
+  两者**分表分档**，查询时合并返回并逐条带 `tier`，播报口径不同（见分支 C-1 / C-1b）；
+  聚合表的条目在官方核验通过后迁入官方表，不长期滞留。
 - **不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
 - **数据授权**：内置规则快照按 CC BY-NC-SA 4.0 提供（`_meta.license`）——个人学习使用
   须保留来源溯源链（sourceName/sourceUrl）；商业使用需另行授权。
@@ -68,6 +72,7 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 联网仅 opt-in 且有硬预算**：
 
 **C-1 先查扩展表（离线，必走第一步）**：
+
 ```
 python3 scripts/visa_lookup.py --types KR        # 该国全部签证类型
 python3 scripts/visa_lookup.py --type kr-c39-double   # 单个类型（已知 id）
@@ -87,6 +92,25 @@ python3 scripts/visa_lookup.py --search 两次签        # 只知道名字时模
   条目 `confidence: medium`（如 DTV 的 180 天为 FAQ 口径）→ `visa_source: "web"` +
   `web_source: {name: 条目.source, url: 条目.sourceUrl, date: 条目.verified_at}`（映射 medium）
 - 播报标注：「✅ 官方类型数据（{type}，{source} {verified_at}）」
+
+**C-1b 聚合表（`tier: "aggregated"`）—— 命中时必须降级播报**：
+
+`--types` / `--type` / `--search` 的结果是**两级表合并**的，每条带 `tier` 字段：
+`tier: "official"` 走上面的口径；`tier: "aggregated"` 走本节口径，**两者绝不可混说**。
+
+- 覆盖：缅甸（旅游电子签 28 / 落地签 30 / 商务 70 / 澜湄 180）、蒙古（K2 旅游 30、
+  K4 文体 30、K6 过境 10、B 类商务每次 30）、马里（电子签 30 / 使馆贴纸 30 / 普通入境 90）、
+  中国澳门（G/L 旅游签注 **7 天**、T 探亲 14 或 90、S 商务 14）、柬埔寨（e-Visa 30 / 落地签 30）、
+  马尔代夫（免费落地签 30 可延至 90）
+- 这些条目**未逐条官方直抓**（官方页多为 SPA / 302 / 不可达，见 `_meta.blocked_official_sources`），
+  全部 `confidence: low` + `needs_official_check: true`
+- 命中后：`visa_source: "aggregated"` → 脚本恒输出 `confidence: low`
+- 播报标注（**强制，不得省略**）：
+  「📋 聚合整理数据（{type}）—— 多源交叉整理，**未逐条官方核验**；请以签证页与使馆口径为准」
+  ⚠️ 禁用「✅ 官方类型数据」字样，禁用「官方核验」表述
+- 用户随后提供签证页数字 → 数字优先，按 `visa_source: "user"` 重跑，置信度升为 high
+- 官方核验通过后，条目应迁入 `visa-types-extended.json` 并在本表删除（升级路径写在 `_meta.note`）
+
 
 **C-2 扩展表未命中 + 用户明确要求联网**（opt-in 触发词：「帮我联网查」「查下官方」
 「网上搜一下」「官方怎么说」）→ 联网兜底，遵守硬预算：
@@ -149,7 +173,8 @@ EOF
   （还没发生的计划行程不传，当前在途行程也不存在）
 - 用户口述过总数时，`reported_days` 填该数字（见第 2 步）
 - 结构化录入（第 3 步分支 B）时传 `visa_source: "user_rules"`；扩展表命中（分支 C-1）
-  传 `"extended"`；联网兜底（分支 C-2）传 `"web"` + `web_source: {name, url, date}`
+  传 `"extended"`；聚合表命中（分支 C-1b）传 `"aggregated"`（脚本恒输出 low）；
+  联网兜底（分支 C-2）传 `"web"` + `web_source: {name, url, date}`
   ——脚本会跑四元组与行程日期校验
 - **播报"还能待几天"只允许两个来源**：`bottom_line`（一句话结论，首选）或
   `single.remaining_days`。**严禁用 `single.effective_days`**——那是"本次入境的总额度"
@@ -167,7 +192,8 @@ EOF
 5. **置信度标签（强制）**：
    - 用户提供了签证页数字 → 「✅ 按你的签证口径」
    - 用户结构化录入了整套规则（第 3 步分支 B）→ 「✅ 按你确认的规则口径（含校验）」
-   - 扩展表命中（分支 C-1）→ 「✅ 官方类型数据（{type}，{source} {verified_at}）」
+   - 扩展表命中（分支 C-1，`tier=official`）→ 「✅ 官方类型数据（{type}，{source} {verified_at}）」
+   - 聚合表命中（分支 C-1b，`tier=aggregated`）→ 「📋 聚合整理数据（{type}），未逐条官方核验，请以签证页与使馆口径为准」
    - 联网检索的规则（分支 C-2）→ 「🌐 联网检索自 {name}（{date}），请以签证页为准」
    - 用户确认签证类型与 dataset 匹配 → 「✅ 常见旅游签参考值」
    - 用户说不清签证类型 → 「⚠️ 参考值，请以签证页为准」
@@ -239,6 +265,9 @@ EOF
 - `references/visa-types-extended.bin` — 高频签证类型扩展表（加密，官方页面实抓核验，
   9 国 31 条：日本 3 类 / 澳大利亚 600 3 流 / 泰国 2 类 / 菲律宾 2 类 / 阿根廷 5 类 /
   马尔代夫 2 类 / 斯里兰卡 7 类 / 尼泊尔 3 类 / 韩国 4 类；分支 C-1 离线命中，避免联网延迟）
+- `references/visa-types-aggregated.bin` — 二级聚合表（加密，**未逐条官方核验**，
+  6 国 17 条：缅甸 4 / 蒙古 4 / 马里 3 / 中国澳门 3 / 柬埔寨 2 / 马尔代夫补充 1；
+  全部 `confidence: low`，命中后按分支 C-1b 降级播报）
 - `references/countries.md` — 213 国代码/名称/时区/别名
 - `references/pools.md` — 共享天数池（申根 35 国 / 美国 / 英国）
 - `references/rules-guide.md` — 领域指南（x/N/y · 执法口径 · 算法口径 · 护栏）

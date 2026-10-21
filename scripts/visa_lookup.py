@@ -20,6 +20,10 @@ import _seal
 
 _rules_cache = None
 _ext_cache = None
+_agg_cache = None
+
+# 聚合表条目必须随结果一起播报的免责口径（SKILL.md 对应章节依赖此字段）
+_WARN = "数据为 AI 聚合整理（confidence=low），未逐条官方直抓；请以签证页与使馆官方口径为准。"
 
 
 def _rules():
@@ -34,6 +38,31 @@ def _ext():
     if _ext_cache is None:
         _ext_cache = _seal.load("visa-types-extended")
     return _ext_cache
+
+
+def _agg():
+    """二级表：AI 聚合整理数据。文件缺失时视为空表，不影响主流程。"""
+    global _agg_cache
+    if _agg_cache is None:
+        try:
+            _agg_cache = _seal.load("visa-types-aggregated")
+        except Exception:
+            _agg_cache = {"countries": {}, "_meta": {}}
+    return _agg_cache
+
+
+def _merged_types(cc):
+    """合并官方表与聚合表同一国家的类型，逐条标注 tier。"""
+    hits = []
+    for tier, doc in (("official", _ext()), ("aggregated", _agg())):
+        node = doc.get("countries", {}).get(cc)
+        if not node:
+            continue
+        for t in node.get("types", []):
+            item = dict(t)
+            item["tier"] = tier
+            hits.append(item)
+    return hits
 
 
 def out(obj):
@@ -51,18 +80,24 @@ def main():
     a = ap.parse_args()
 
     if a.meta:
-        d, e = _rules(), _ext()
-        out({"rules_data": d.get("_meta"), "extended": e.get("_meta")})
+        d, e, g = _rules(), _ext(), _agg()
+        out({"rules_data": d.get("_meta"), "extended": e.get("_meta"),
+             "aggregated": g.get("_meta")})
         return
 
     if a.countries:
-        e = _ext()
+        # 合并两级，官方优先；同国出现在两级时合并 type_count 并标出 tier
+        acc = {}
+        for tier, doc in (("official", _ext()), ("aggregated", _agg())):
+            for k, v in doc.get("countries", {}).items():
+                slot = acc.setdefault(k, {"code": k, "name": v.get("countryName"),
+                                          "type_count": 0, "tiers": []})
+                slot["type_count"] += len(v.get("types", []))
+                slot["tiers"].append(tier)
         out({
-            "countries": [
-                {"code": k, "name": v.get("countryName"), "type_count": len(v.get("types", []))}
-                for k, v in e["countries"].items()
-            ],
-            "total_types": sum(len(v.get("types", [])) for v in e["countries"].values()),
+            "countries": list(acc.values()),
+            "total_types": sum(x["type_count"] for x in acc.values()),
+            "tiers": {"official": "官方页面实抓核验", "aggregated": "AI 聚合整理，需官方复核"},
         })
         return
 
@@ -77,33 +112,42 @@ def main():
 
     if a.types:
         cc = a.types.upper()
-        node = _ext()["countries"].get(cc)
-        if not node:
+        types = _merged_types(cc)
+        if not types:
             out({"found": False, "countryCode": cc})
             return
-        out({"found": True, "countryCode": cc, "countryName": node.get("countryName"),
-             "types": node.get("types", [])})
+        name = next((doc["countries"][cc].get("countryName")
+                     for doc in (_ext(), _agg()) if cc in doc.get("countries", {})), None)
+        out({"found": True, "countryCode": cc, "countryName": name, "types": types,
+             "warning": _WARN})
         return
 
     if a.type:
         tid = a.type.lower()
-        for cc, node in _ext()["countries"].items():
-            for t in node.get("types", []):
-                if t.get("id") == tid:
-                    out({"found": True, "countryCode": cc, "type": t})
-                    return
+        for tier, doc in (("official", _ext()), ("aggregated", _agg())):
+            for cc, node in doc.get("countries", {}).items():
+                for t in node.get("types", []):
+                    if t.get("id") == tid:
+                        item = dict(t, tier=tier)
+                        out({"found": True, "countryCode": cc, "type": item,
+                             **({"warning": _WARN} if tier == "aggregated" else {})})
+                        return
         out({"found": False, "id": a.type})
         return
 
     if a.search:
         kw = a.search.lower()
         hits = []
-        for cc, node in _ext()["countries"].items():
-            for t in node.get("types", []):
-                hay = (t.get("id", "") + t.get("type", "") + " ".join(t.get("aliases", []))).lower()
-                if kw in hay:
-                    hits.append({"countryCode": cc, "id": t["id"], "type": t["type"],
-                                 "stay_single": t["stay_single"], "confidence": t["confidence"]})
+        for tier, doc in (("official", _ext()), ("aggregated", _agg())):
+            for cc, node in doc.get("countries", {}).items():
+                for t in node.get("types", []):
+                    hay = (t.get("id", "") + t.get("type", "") + " ".join(t.get("aliases", []))).lower()
+                    if kw in hay:
+                        hits.append({"countryCode": cc, "id": t["id"], "type": t["type"],
+                                     "stay_single": t["stay_single"], "confidence": t["confidence"],
+                                     "tier": tier})
+        # 官方表命中排前面
+        hits.sort(key=lambda h: 0 if h["tier"] == "official" else 1)
         out({"found": bool(hits), "keyword": a.search, "matches": hits})
         return
 

@@ -89,6 +89,7 @@ def load(name):
 def pack():
     pairs = [
         ("visa-types-extended", "visa-types-extended.json"),
+        ("visa-types-aggregated", "visa-types-aggregated.json"),
         ("rules-data", "rules-data.json"),
     ]
     for out_name, src in pairs:
@@ -105,7 +106,7 @@ def pack():
 
 
 def unpack():
-    for name in ("visa-types-extended", "rules-data"):
+    for name in ("visa-types-extended", "visa-types-aggregated", "rules-data"):
         path = os.path.join(REF, name + ".bin")
         if not os.path.exists(path):
             continue
