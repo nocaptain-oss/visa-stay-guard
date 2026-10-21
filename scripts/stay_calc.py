@@ -31,10 +31,18 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
     {"country": "FR", "entry": "2026-09-01", "exit": "2026-09-20"},   // 已离境
     {"country": "ES", "entry": "2026-10-10", "exit": null}            // 在途（当前）
   ],
-  "as_of": null                          // 可选：评估日（未来入境场景传计划入境日），默认 today
+  "as_of": null,                         // 可选：评估日（未来入境场景传计划入境日），默认 today
+  "visa_type": "旅游签",                 // 可选：用户签证类型（旅游/商务/探亲/留学/其他）
+  "visa_source": "dataset",              // 可选：数据来源（dataset=dataset值 / user=用户签证页数字）
+  "visa_days": null                      // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
 }
 
-输出（stdout JSON）：见 SKILL.md 的字段说明。
+输出（stdout JSON）：含 `confidence` 字段，取值：
+- "high"：用户提供了签证页数字（visa_source="user"）
+- "medium"：用户确认签证类型与 dataset 匹配
+- "low"：用户说不清签证类型，用 dataset 值
+- "none"：用户签证类型与 dataset 不匹配
+
 """
 import json
 import sys
@@ -100,6 +108,26 @@ def run(payload):
     pool = pool_of(country)
     trips = payload.get('trips') or []
 
+    # 签证来源与置信度
+    visa_source = payload.get('visa_source', 'dataset')  # dataset / user
+    visa_days = payload.get('visa_days')  # 用户签证页数字（覆盖 rules.stay_single）
+    visa_type = payload.get('visa_type', '')  # 用户签证类型（用于置信度判断）
+
+    # 用户签证页数字覆盖 dataset 值
+    if visa_days and visa_days > 0:
+        single = int(visa_days)
+        visa_source = 'user'
+
+    # 置信度判定
+    if visa_source == 'user':
+        confidence = 'high'
+    elif visa_type and visa_type.strip():
+        confidence = 'medium'
+    elif payload.get('as_of') is not None:
+        confidence = 'medium'  # 未来入境场景默认 medium
+    else:
+        confidence = 'low'  # 用户没说签证类型，用 dataset 值
+
     # 全部行程占用（日集合自动去重：重叠段只算一次）
     all_days = set()
     current = None
@@ -122,6 +150,11 @@ def run(payload):
         'rules_effective': {'stay_single': single, 'stay_window': window_n,
                             'stay_window_max': window_max,
                             'calendar_year_window': cal_year},
+        'visa_info': {
+            'visa_type': visa_type or None,
+            'visa_source': visa_source,
+            'confidence': confidence,
+        },
         'window': None,
         'single': None,
         'status': 'unknown',
