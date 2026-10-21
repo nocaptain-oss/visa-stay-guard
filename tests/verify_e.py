@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """E 系列：扩展表（visa-types-extended.json）结构与脚本消费验证
 
+覆盖：全表结构合法性（遍历所有国家/类型）+ JP/AU/TH 的脚本消费链路。
+
 用法: python3 tests/verify_e.py [被测脚本路径]
 """
 import json, os, subprocess, sys
@@ -15,48 +17,80 @@ def check(name, cond, detail=""):
     print(f"  {'PASS' if cond else 'FAIL'} {name}  {detail}")
     if not cond: fails.append(name)
 
-# E1 扩展表结构合法
+# E1 全表结构合法（遍历）
 ext = json.load(open(EXT))
 check("E1a _meta 完备", all(k in ext["_meta"] for k in ("license", "updated_at", "confidence_model")))
-th = ext["countries"]["TH"]["types"]
-check("E1b TH 两条类型", len(th) == 2, f"got={len(th)}")
-ids = [t["id"] for t in th]
-check("E1c id 唯一", len(set(ids)) == len(ids))
-req = ("type", "stay_single", "stay_window", "stay_window_max", "confidence", "source", "sourceUrl", "sourceTier", "verified_at")
-for t in th:
-    check(f"E1d {t['id']} 字段完备", all(k in t for k in req), str([k for k in req if k not in t]))
-    check(f"E1e {t['id']} 官方源", t["sourceTier"] == "official" and t["sourceUrl"].startswith("https://"), t["sourceUrl"])
-    check(f"E1f {t['id']} confidence 合法", t["confidence"] in ("high", "medium"), t["confidence"])
+req = ("id", "type", "stay_single", "stay_window", "stay_window_max",
+       "confidence", "source", "sourceUrl", "sourceTier", "verified_at")
+all_ids = []
+for code, c in ext["countries"].items():
+    types = c.get("types") or []
+    check(f"E1b {code} 有类型且含 countryName", bool(types) and bool(c.get("countryName")), f"types={len(types)}")
+    for t in types:
+        all_ids.append(t["id"])
+        miss = [k for k in req if k not in t]
+        check(f"E1c {t['id']} 字段完备", not miss, str(miss))
+        check(f"E1d {t['id']} 官方源", t["sourceTier"] == "official" and t["sourceUrl"].startswith("https://"), t["sourceUrl"])
+        check(f"E1e {t['id']} confidence 合法", t["confidence"] in ("high", "medium"), t["confidence"])
+        check(f"E1f {t['id']} 数字非负", t["stay_single"] >= 0 and t["stay_window"] >= 0, f"{t['stay_single']}/{t['stay_window']}")
+        check(f"E1g {t['id']} sourceUrl 非首页", t["sourceUrl"].rstrip("/").count("/") >= 3, t["sourceUrl"])
+check("E1h id 全表唯一", len(set(all_ids)) == len(all_ids), f"{len(all_ids)} 条 / {len(set(all_ids))} 唯一")
+
+def rule(t):
+    return {"stay_single": t["stay_single"], "stay_window": t["stay_window"],
+            "stay_window_max": t["stay_window_max"]}
 
 def run(p):
     r = subprocess.run(["python3", SCRIPT], input=json.dumps(p), capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:300]
     return json.loads(r.stdout)
 
-# E2 脚本 extended 来源 → high + rules.source=extended
-tr = th[0]
-o = run({"country":"TH","today":"2026-10-21",
-         "rules":{"stay_single":tr["stay_single"],"stay_window":tr["stay_window"],"stay_window_max":tr["stay_window_max"]},
-         "trips":[{"country":"TH","entry":"2026-10-14","exit":None}],
-         "visa_type":tr["type"],"visa_source":"extended"})
-check("E2a extended → confidence=high", o["visa_info"]["confidence"]=="high", o["visa_info"]["confidence"])
-check("E2b rules.source=extended", o["rules_effective"]["source"]=="extended")
-check("E2c TR 单次 60 天：最晚 12-12", o["single"]["last_allowed_day"]=="2026-12-12", o["single"]["last_allowed_day"])
+# E2 泰国 TR：extended → high
+tr = next(t for t in ext["countries"]["TH"]["types"] if t["id"] == "th-tr")
+o = run({"country": "TH", "today": "2026-10-21", "rules": rule(tr),
+         "trips": [{"country": "TH", "entry": "2026-10-14", "exit": None}],
+         "visa_type": tr["type"], "visa_source": "extended"})
+check("E2a extended → confidence=high", o["visa_info"]["confidence"] == "high", o["visa_info"]["confidence"])
+check("E2b rules.source=extended", o["rules_effective"]["source"] == "extended")
+check("E2c TR 单次 60 天：最晚 12-12", o["single"]["last_allowed_day"] == "2026-12-12", o["single"]["last_allowed_day"])
 
-# E3 DTV（confidence=medium）→ 走 web 口径
-dtv = th[1]
-o = run({"country":"TH","today":"2026-10-21",
-         "rules":{"stay_single":dtv["stay_single"],"stay_window":dtv["stay_window"],"stay_window_max":dtv["stay_window_max"]},
-         "trips":[],"as_of":"2026-11-20",
-         "visa_type":dtv["type"],"visa_source":"web",
-         "web_source":{"name":dtv["source"],"url":dtv["sourceUrl"],"date":dtv["verified_at"]}})
-check("E3a DTV → confidence=medium", o["visa_info"]["confidence"]=="medium")
-check("E3b web_source 指向扩展表页面", o["visa_info"]["web_source"]["url"]==dtv["sourceUrl"])
+# E3 泰国 DTV（medium）→ 走 web 口径
+dtv = next(t for t in ext["countries"]["TH"]["types"] if t["id"] == "th-dtv")
+o = run({"country": "TH", "today": "2026-10-21", "rules": rule(dtv),
+         "trips": [], "as_of": "2026-11-20",
+         "visa_type": dtv["type"], "visa_source": "web",
+         "web_source": {"name": dtv["source"], "url": dtv["sourceUrl"], "date": dtv["verified_at"]}})
+check("E3a DTV → confidence=medium", o["visa_info"]["confidence"] == "medium")
+check("E3b web_source 指向扩展表页面", o["visa_info"]["web_source"]["url"] == dtv["sourceUrl"])
 
 # E4 extended 不被 visa_days 降级
-o = run({"country":"TH","today":"2026-10-21",
-         "rules":{"stay_single":60,"stay_window":0,"stay_window_max":0},
-         "trips":[],"as_of":"2026-11-20","visa_source":"extended","visa_days":60})
-check("E4 extended 保持 source", o["rules_effective"]["source"]=="extended" and o["visa_info"]["confidence"]=="high")
+o = run({"country": "TH", "today": "2026-10-21",
+         "rules": {"stay_single": 60, "stay_window": 0, "stay_window_max": 0},
+         "trips": [], "as_of": "2026-11-20", "visa_source": "extended", "visa_days": 60})
+check("E4 extended 保持 source", o["rules_effective"]["source"] == "extended" and o["visa_info"]["confidence"] == "high")
+
+# E5 日本三年多次：30 天/次
+jp3 = next(t for t in ext["countries"]["JP"]["types"] if t["id"] == "jp-tourist-multi-3y")
+o = run({"country": "JP", "today": "2026-10-21", "rules": rule(jp3),
+         "trips": [{"country": "JP", "entry": "2026-10-15", "exit": None}],
+         "visa_type": jp3["type"], "visa_source": "extended"})
+check("E5a JP 三年多次 → 30 天", o["single"]["effective_days"] == 30, f"got={o['single']['effective_days']}")
+check("E5b JP 三年多次 → high", o["visa_info"]["confidence"] == "high")
+check("E5c JP 最晚离境 11-13", o["single"]["last_allowed_day"] == "2026-11-13", o["single"]["last_allowed_day"])
+
+# E6 日本五年多次：90 天/次
+jp5 = next(t for t in ext["countries"]["JP"]["types"] if t["id"] == "jp-tourist-multi-5y")
+o = run({"country": "JP", "today": "2026-10-21", "rules": rule(jp5),
+         "trips": [{"country": "JP", "entry": "2026-10-15", "exit": None}],
+         "visa_type": jp5["type"], "visa_source": "extended"})
+check("E6a JP 五年多次 → 90 天", o["single"]["effective_days"] == 90, f"got={o['single']['effective_days']}")
+
+# E7 澳洲常旅客：90 天/次 + 多次
+auf = next(t for t in ext["countries"]["AU"]["types"] if t["id"] == "au-600-frequent")
+o = run({"country": "AU", "today": "2026-10-21", "rules": rule(auf),
+         "trips": [{"country": "AU", "entry": "2026-10-01", "exit": None}],
+         "visa_type": auf["type"], "visa_source": "extended"})
+check("E7a AU 常旅客 → 90 天", o["single"]["effective_days"] == 90, f"got={o['single']['effective_days']}")
+check("E7b AU 最晚离境 12-29", o["single"]["last_allowed_day"] == "2026-12-29", o["single"]["last_allowed_day"])
 
 print(f"\n{len(fails)} 失败"); sys.exit(1 if fails else 0)

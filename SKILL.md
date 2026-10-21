@@ -68,8 +68,11 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 联网仅 opt-in 且有硬预算**：
 
 **C-1 先查扩展表 `references/visa-types-extended.json`（离线，必走第一步）**：
-- 该表收录 dataset 之外的**高频签证类型**（官方页面实抓核验，如泰国 TR 60 天单次、
-  DTV 5 年多次）。用户能说出类型名/别名（旅游签/DTV/商务签等）→ 直接命中，**不要联网**
+- 该表收录 dataset 之外的**高频签证类型**（官方页面实抓核验）：日本（单次 15/30 天、
+  三年多次 30 天/次、五年多次 90 天/次）、澳大利亚 600（旅游流/常旅客流 90 天/次）、
+  泰国（TR 60 天单次、DTV 5 年多次）。用户能说出类型名/别名（旅游签/三年多次/五年多次/
+  商务签/DTV 等）→ 直接命中，**不要联网**。只对「同一护照多签证类型且天数不同」的国家
+  有增量，免签国与统一口径国（申根、美国、英国）已在 dataset，不重复收录
 - 命中后：条目 `confidence: high` → `visa_source: "extended"`（脚本映射 high）；
   条目 `confidence: medium`（如 DTV 的 180 天为 FAQ 口径）→ `visa_source: "web"` +
   `web_source: {name: 条目.source, url: 条目.sourceUrl, date: 条目.verified_at}`（映射 medium）
@@ -85,7 +88,9 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 3. **第一跳锚定 dataset 该国 sourceUrl 站内**（已核验官方信源，可信度继承核验等级；
    裸域名补 `https://`）：首页导航找「签证/Visa」栏目 → 签证类型页；站内定位可用搜索引擎
    但检索词必须锚定该域名，`site:` 语法失效（实测中文引擎会忽略它）时弃用改站点导航；
-   官方站 403/500 如实转跳，不硬刚
+   **官方站 403 先试一次 UA 伪装重试**：`--headless=new --disable-blink-features=AutomationControlled`
+   + 桌面 UA（`Chrome/126.0.0.0`）——实测可破 Akamai 拦截（日本驻华使馆、澳洲内政部均由此打通）；
+   仍 403/500 如实转跳，不硬刚
 4. **第二跳仅当第一跳站内无数据**：搜索引擎外扩且只认官方域名——emb/embassy、
    immigration、gov，以及**目的地国政府 TLD**（.go.th / .gov.vn / .gob.pe 等）；
    百科/攻略/论坛/聚合站一律剔除
@@ -201,7 +206,7 @@ EOF
 - `scripts/stay_calc.py` — 停留计算器（确定性纯函数；JSON in/out）
 - `references/rules-data.json` — 213 国已核验规则数据（含官方来源链接，快照模式）
 - `references/visa-types-extended.json` — 高频签证类型扩展表（官方页面实抓核验，
-  如泰国 TR/DTV；分支 C-1 离线命中，避免联网延迟）
+  日本 3 类 / 澳大利亚 600 3 流 / 泰国 2 类；分支 C-1 离线命中，避免联网延迟）
 - `references/countries.md` — 213 国代码/名称/时区/别名
 - `references/pools.md` — 共享天数池（申根 35 国 / 美国 / 英国）
 - `references/rules-guide.md` — 领域指南（x/N/y · 执法口径 · 算法口径 · 护栏）
