@@ -53,8 +53,13 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
 
 """
 import json
+import os
+import re
 import sys
 from datetime import date, timedelta
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _lunar import cn_num, is_lunar, parse_lunar  # noqa: E402  农历换算（纯查表，离线）
 
 DANGER_DAYS = 3   # 剩余 ≤3 天 ⇒ danger（红）—— 全应用唯一来源，勿另写魔法数字
 NEAR_DAYS = 7     # 剩余 4~7 天 ⇒ near（橙）
@@ -70,16 +75,46 @@ POOLS = {
 }
 
 
-def d(s):
-    """宽容的日期解析：YYYY-MM-DD / YYYY/M/D / YYYY.M.D / YYYY年M月D日 / YYYYMMDD。
+class InputError(Exception):
+    """带用户可读 hint 的输入错误：main 原样转成 JSON，模型照着 hint 重试。"""
 
-    模型把用户口语（「3 月 1 号」）转成非 ISO 写法是常事，入口容错比让脚本崩掉可靠。
-    缺年份的写法（「3月1日」）无法猜，仍抛 ValueError，由 main 兜成 JSON 错误。"""
+    def __init__(self, msg, hint=None):
+        super().__init__(msg)
+        self.hint = hint
+
+
+_CN_DATE_RUN = re.compile(r'[零〇一二三四五六七八九十廿卅]{1,3}')
+
+
+def _cn_repl(m):
+    v = cn_num(m.group())
+    return str(v) if v is not None else m.group()
+
+
+def d(s):
+    """宽容的日期解析。
+
+    公历：`2026-03-01` / `2026/3/1` / `2026.3.1` / `2026年3月1日` / `20260301`，
+    也认汉字数字（`2026年八月十五` = 8 月 15 日）。
+    农历：带「农历/阴历」前缀、含「闰X月」、或含「初X」的一律按农历换算——
+    公历没有「初五」这种说法，看到就只可能指农历，不去猜。缺年份默认今年，
+    播报时必须写出换算后的公历日让用户核对。
+    缺年份的公历写法（`3月1日`）仍抛错，由 main 兜成 JSON。"""
     if not s:
         return None
     if isinstance(s, date):
         return s
     t = str(s).strip()
+    if is_lunar(t):
+        out, why = parse_lunar(t)
+        if out is None:
+            raise InputError(
+                '农历日期「%s」换算不了（%s）' % (t, why),
+                '农历要写到月和日，如「农历八月十五」「五月初五」；只说「初五」定不了'
+                '是哪个月。也可以直接给公历日期。')
+        return out
+    t = _CN_DATE_RUN.sub(_cn_repl, t)      # 先归一汉字数字，再换分隔符
+    t = t.replace('号', '日')
     for sep in ('年', '月', '日'):
         t = t.replace(sep, '-')
     t = t.replace('/', '-').replace('.', '-').rstrip('-')
@@ -88,6 +123,11 @@ def d(s):
     parts = [p for p in t.split('-') if p]
     if len(parts) == 3 and all(p.isdigit() for p in parts):
         return date(*(int(p) for p in parts))
+    if len(parts) == 2 and all(p.isdigit() for p in parts):
+        raise InputError(
+            '日期「%s」缺年份' % s,
+            '「5月18日」这种只到月日的写法定不了年份，先从对话里补全年份'
+            '（如 2026-05-18）再传；不要自己猜年份。')
     return date.fromisoformat(t)
 
 
@@ -426,8 +466,9 @@ def main():
             'status': 'error',
             'bottom_line': '输入有误，无法计算——请按 SKILL.md 第 5 步的字段格式重传',
             'alerts': [f'❌ {type(e).__name__}: {e}'],
-            'hint': '日期必须能解析成具体某一天（如 2026-03-01）。「3月1日」缺年份、'
-                    '「下个月」这类相对说法无法计算，先向用户确认年份与具体日期。',
+            'hint': getattr(e, 'hint', None)
+                    or ('日期必须能解析成具体某一天（如 2026-03-01）。「3月1日」缺年份、'
+                        '「下个月」这类相对说法无法计算，先向用户确认年份与具体日期。'),
         }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

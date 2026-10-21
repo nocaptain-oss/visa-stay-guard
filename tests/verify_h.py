@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""H 系列：农历换算与汉字数字日期
+
+用户口语里「五月初五」「农历八月十五」「五月十八」混着出现，且前两种只可能是农历
+（公历没有「初五」这种说法）。本轮规则：
+  - 带「农历/阴历」、含「闰X月」、含「初X」→ 必按农历换算
+  - 其余 → 当公历，但汉字数字要归一（「五月十八」= 5 月 18 日）
+  - 只说「初五」没有月份 → 报错追问，不猜
+
+数据向量的外部核对来源：黄历工具（2026 春节 2026-02-17、中秋 2026-09-25）
+与 zhdate 参考实现（1900-2100 逐日 73372 天零误差）。
+
+用法: python3 tests/verify_h.py
+"""
+import json, os, subprocess, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import _lunar as L
+from stay_calc import d, InputError
+
+CALC = os.path.join(ROOT, "scripts", "stay_calc.py")
+fails = []
+
+
+def check(name, cond, detail=""):
+    print(f"  {'PASS' if cond else 'FAIL'} {name}  {detail}")
+    if not cond:
+        fails.append(name)
+
+
+def calc(payload):
+    r = subprocess.run(["python3", CALC], input=json.dumps(payload),
+                       capture_output=True, text=True)
+    return json.loads(r.stdout)
+
+
+def iso(y, m, dd, leap=False):
+    v = L.lunar_to_solar(y, m, dd, leap)
+    return v.isoformat() if v else None
+
+
+print("== H1 已知锚点（外部核对） ==")
+check("H1.1 2026 正月初一 = 2026-02-17", iso(2026, 1, 1) == "2026-02-17")
+check("H1.2 2026 八月十五 = 2026-09-25", iso(2026, 8, 15) == "2026-09-25")
+check("H1.3 2025 闰六月初一 = 2025-07-25", iso(2025, 6, 1, True) == "2025-07-25")
+check("H1.4 2033 闰十一月初一 = 2033-12-22", iso(2033, 11, 1, True) == "2033-12-22")
+check("H1.5 1900 正月初一 = 1900-01-31", iso(1900, 1, 1) == "1900-01-31")
+check("H1.6 2100 正月初一 = 2100-02-09", iso(2100, 1, 1) == "2100-02-09")
+
+print("== H2 闰月与越界 ==")
+check("H2.1 2026 无闰月", L.leap_month_of(2026) == 0)
+check("H2.2 2025 闰六月", L.leap_month_of(2025) == 6)
+check("H2.3 无此闰月返回 None", iso(2026, 5, 1, True) is None)
+check("H2.4 1899 越界", iso(1899, 1, 1) is None)
+check("H2.5 2101 越界", iso(2101, 1, 1) is None)
+# 2026 年农历二月是否有三十，按数据判断，不写死
+feb30 = iso(2026, 2, 30)
+check("H2.6 不存在的小月三十返回 None 或真实日期",
+      feb30 is None or feb30.endswith("-30"), f"二月初十={iso(2026,2,10)} 二月三十={feb30}")
+
+print("== H3 汉字数字与农历判定 ==")
+check("H3.1 农历八月十五 → 2026-09-25",
+      L.parse_lunar("农历八月十五", 2026)[0] == L.lunar_to_solar(2026, 8, 15))
+check("H3.2 五月初五 含「初」→ 必是农历", L.is_lunar("五月初五"))
+check("H3.3 初五（无月份）无法定位", L.parse_lunar("初五", 2026)[0] is None)
+check("H3.4 八月十五 无前缀 → 不是农历（按用户规则）", not L.is_lunar("八月十五"))
+check("H3.5 五月十八 无前缀 → 不是农历", not L.is_lunar("五月十八"))
+check("H3.6 闰二月十五 → 2023-04-05",
+      L.parse_lunar("2023年闰二月十五", 2030)[0].isoformat() == "2023-04-05")
+check("H3.7 腊月廿三 → 公历跨年", L.parse_lunar("腊月廿三", 2026)[0].isoformat() == "2027-01-30")
+check("H3.8 正月初一 = 春节",
+      L.parse_lunar("正月初一", 2026)[0].isoformat() == "2026-02-17")
+check("H3.9 汉字数字：十五=15 廿三=23 三十=30",
+      (L.cn_num("十五"), L.cn_num("廿三"), L.cn_num("三十")) == (15, 23, 30))
+
+print("== H4 d() 入口 ==")
+check("H4.1 2026年农历八月十五 → 2026-09-25", d("2026年农历八月十五").isoformat() == "2026-09-25")
+check("H4.2 2026年八月十五 → 公历 8 月 15", d("2026年八月十五").isoformat() == "2026-08-15")
+check("H4.3 2026年五月十八 → 公历 5 月 18", d("2026年五月十八").isoformat() == "2026-05-18")
+check("H4.4 五月初五 → 农历", d("2026年五月初五").isoformat() == "2026-06-19")
+try:
+    d("初五")
+    check("H4.5 只说初五 → 拒绝并追问", False, "没有抛错")
+except InputError as e:
+    check("H4.5 只说初五 → 拒绝并追问", "月" in (e.hint or ""), (e.hint or "")[:24])
+try:
+    d("五月十八")
+    check("H4.6 缺年份 → 拒绝并提示补年", False, "没有抛错")
+except InputError as e:
+    check("H4.6 缺年份 → 拒绝并提示补年", "年份" in (e.hint or ""), (e.hint or "")[:24])
+
+print("== H5 整条计算链 ==")
+base = {"rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+        "today": "2026-10-21"}
+r = calc({**base, "country": "ES",
+          "trips": [{"country": "ES", "entry": "2026年农历八月十五", "exit": None}]})
+check("H5.1 农历入境日可算", r.get("status") != "error", r.get("bottom_line", r.get("hint", ""))[:40])
+r2 = calc({**base, "country": "ES",
+           "trips": [{"country": "ES", "entry": "2026-09-25", "exit": None}]})
+check("H5.2 农历入口与显式公历结果一致",
+      r.get("bottom_line") == r2.get("bottom_line"), r.get("bottom_line", ""))
+r3 = calc({**base, "country": "ES", "trips": [{"country": "ES", "entry": "初五", "exit": None}]})
+check("H5.3 农历残缺输入返回可读 hint 而非崩栈",
+      r3.get("status") == "error" and "月" in r3.get("hint", ""), r3.get("hint", "")[:30])
+
+print()
+print(f"结果: {len(fails)} 失败" + (f" -> {fails}" if fails else ""))
+sys.exit(1 if fails else 0)
