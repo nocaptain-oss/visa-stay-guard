@@ -130,4 +130,20 @@ for code, c in agg["countries"].items():
             check(f"A9 {t['id']} 与 dataset 同天数须显式说明", bool(t.get("notes")),
                   "同天数但未标 duplicates_dataset，至少要在 notes 说明差异")
 
+# A10 单次天数不得超过窗口累计上限 —— 否则会同时输出「本次可待 180 天」和「窗口内累计只允许 90 天」
+# 两个互相矛盾的结论，用户按前者安排行程就会超期。埃及五年多次签就是这种情况（单次 180 / dataset 窗口 90）。
+for code, c in agg["countries"].items():
+    for t in c["types"]:
+        if t["stay_window_max"]:
+            check(f"A10 {t['id']} 单次≤窗口累计上限",
+                  t["stay_single"] <= t["stay_window_max"],
+                  f"单次 {t['stay_single']} 天 > 窗口 {t['stay_window']} 天内累计 {t['stay_window_max']} 天")
+
+# A11 声明了日历窗口的国家必须给出年度上限（印度 180 天/日历年），否则日历窗口等于没建模
+for code, c in agg["countries"].items():
+    for t in c["types"]:
+        if t.get("calendar_year_window"):
+            check(f"A11 {t['id']} 日历窗口须有年度上限", t["stay_window_max"] > 0,
+                  f"calendar_year_window=true 但 stay_window_max={t['stay_window_max']}")
+
 print(f"\n{len(fails)} 失败"); sys.exit(1 if fails else 0)
