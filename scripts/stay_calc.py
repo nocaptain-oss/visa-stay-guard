@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟依赖）
+
+语义级移植自 VisaDay AI 的 StayCalculator / StayWindowPolicy（ArkTS），
+口径与原实现一一对应，但用「自然日集合」替代毫秒区间（数据量小，天然去重、无 off-by-one）。
+
+核心口径（源自原应用多年审计沉淀，勿改）：
+ 1. 天数一律「含入境当日」：9-01 入住、9-20 离境 = 20 天（离境日计入停留）。
+ 2. 滚动窗口 = [今天-(N-1)天, 今天]，含今天共 N 天；按目的地时区的日历日。
+    （调用方传入的 today/as_of 必须已是目的地时区的日历日——见 SKILL.md）
+ 3. 在途行程占用 = 入境日..今天（含今天）；已离境 = 入境日..离境日（含两端）。
+ 4. 同池国家共享额度：申根 35 国共用同一个 180/90 池（跳国不清零）。
+ 5. 本次有效上限 = min(单次上限, 窗口上限 - 同池其它行程已用)，下限 1 天。
+ 6. 额度释放（滚动）：窗口内最早占用日滑出窗口之日 = 该日 + N；恢复是逐日 +1，
+    不是一次性到账（按整段 M 天展示会误导用户超停）。
+ 7. 风险分档：剩余 ≤3 天 = danger（红）；4~7 天 = near（橙）；已超期恒 danger。
+
+输入（stdin 或 argv[1] 的 JSON 文件路径）：
+{
+  "country": "ES",                       // 必填：当前国家/地区 ISO 3166-1 alpha-2
+  "today": "2026-10-21",                 // 可选：目的地时区今天的日历日，默认取本机时区今天
+  "rules": {                             // 必填：该池的停留规则（数字须有官方来源，未收录勿猜）
+    "stay_single": 90,                   // x：单次入境最长停留
+    "stay_window": 180,                  // N：累计统计窗口（自然年模式填 0）
+    "stay_window_max": 90,               // y：窗口内累计上限
+    "calendar_year_window": false        // true = 自然年窗口（每年当地 1月1日 清零）
+  },
+  "trips": [                             // 同池全部历史行程（含当前在途；其它池的不用传）
+    {"country": "FR", "entry": "2026-09-01", "exit": "2026-09-20"},   // 已离境
+    {"country": "ES", "entry": "2026-10-10", "exit": null}            // 在途（当前）
+  ],
+  "as_of": null                          // 可选：评估日（未来入境场景传计划入境日），默认 today
+}
+
+输出（stdout JSON）：见 SKILL.md 的字段说明。
+"""
+import json
+import sys
+from datetime import date, timedelta
+
+DANGER_DAYS = 3   # 剩余 ≤3 天 ⇒ danger（红）—— 全应用唯一来源，勿另写魔法数字
+NEAR_DAYS = 7     # 剩余 4~7 天 ⇒ near（橙）
+
+# 共享天数池（与 references/pools.md 一致）：成员国的行程合并进同一池计算
+POOLS = {
+    'SCHENGEN': {
+        'members': {'AT','BE','BG','CH','CZ','DE','DK','EE','ES','FI','FO','FR','GI','GL','GR','HR','HU',
+                    'IS','IT','LI','LT','LU','LV','MC','MT','NL','NO','PL','PT','RO','SE','SI','SK','SM','VA'},
+    },
+    'US': {'members': {'US','PR','GU','VI','MP'}},
+    'UK': {'members': {'GB','XB'}},
+}
+
+
+def d(s):
+    return date.fromisoformat(s) if s else None
+
+
+def pool_of(code):
+    for pid, cfg in POOLS.items():
+        if code in cfg['members']:
+            return pid
+    return None
+
+
+def occupied_days(trip, today):
+    """一条行程占用的自然日集合（含入境当日；在途截至今天，离境日计入停留）。"""
+    entry = d(trip['entry'])
+    if entry is None:
+        return set()
+    exit_ = d(trip.get('exit'))
+    end = exit_ if exit_ is not None else today
+    if end < entry:
+        return set()
+    return {entry + timedelta(days=i) for i in range((end - entry).days + 1)}
+
+
+def window_dates(as_of, window_days, calendar_year):
+    """窗口自然日集合：滚动 = [as_of-(N-1), as_of]；自然年 = 当年 1月1日..as_of。"""
+    if calendar_year:
+        start = date(as_of.year, 1, 1)
+    else:
+        start = as_of - timedelta(days=window_days - 1)
+    return {start + timedelta(days=i) for i in range((as_of - start).days + 1)}
+
+
+def run(payload):
+    country = payload['country'].strip().upper()
+    rules = payload.get('rules') or {}
+    single = int(rules.get('stay_single') or 0)
+    window_n = int(rules.get('stay_window') or 0)
+    window_max = int(rules.get('stay_window_max') or 0)
+    cal_year = bool(rules.get('calendar_year_window'))
+
+    today = d(payload.get('today')) or date.today()
+    as_of = d(payload.get('as_of')) or today
+
+    pool = pool_of(country)
+    trips = payload.get('trips') or []
+
+    # 全部行程占用（日集合自动去重：重叠段只算一次）
+    all_days = set()
+    current = None
+    for t in trips:
+        tc = (t.get('country') or '').strip().upper()
+        if pool and tc and tc not in POOLS[pool]['members']:
+            continue  # 非同池行程不计入
+        all_days |= occupied_days(t, today)
+        if tc == country and not t.get('exit'):
+            current = t
+
+    win = window_dates(as_of, window_n, cal_year)
+    used = len(all_days & win)
+
+    out = {
+        'country': country,
+        'pool': pool,
+        'today': today.isoformat(),
+        'as_of': as_of.isoformat(),
+        'rules_effective': {'stay_single': single, 'stay_window': window_n,
+                            'stay_window_max': window_max,
+                            'calendar_year_window': cal_year},
+        'window': None,
+        'single': None,
+        'status': 'unknown',
+        'alerts': [],
+    }
+
+    # ── 窗口尺 ──
+    if window_max > 0:
+        remaining = max(window_max - used, 0)
+        win_info = {'used': used, 'remaining': remaining,
+                    'window_days': (0 if cal_year else window_n),
+                    'mode': ('calendar_year' if cal_year else 'rolling')}
+        if cal_year:
+            refresh = date(as_of.year + 1, 1, 1)
+            win_info['refresh_date'] = refresh.isoformat()
+            win_info['refresh_days'] = used          # 自然年：次年 1/1 一次性清零
+            win_info['refresh_note'] = '次年 1 月 1 日（目的地时区）年度额度全部恢复'
+        else:
+            in_win = sorted(all_days & win)
+            if in_win:
+                earliest = in_win[0]
+                refresh = earliest + timedelta(days=window_n)
+                win_info['refresh_date'] = refresh.isoformat()
+                win_info['refresh_days'] = 1          # 滚动：逐日回补，每天 +1
+                win_info['refresh_note'] = (
+                    f'额度逐日回补：{refresh.isoformat()} 起每天恢复 1 天'
+                    f'（{earliest.isoformat()} 的占用滑出窗口）；不是一次性到账')
+            else:
+                win_info['refresh_date'] = None
+                win_info['refresh_note'] = '窗口内无占用'
+        out['window'] = win_info
+        if remaining == 0:
+            out['alerts'].append(f'窗口额度已用尽（{used}/{window_max}）——再入境前须等额度释放')
+        elif remaining <= NEAR_DAYS:
+            out['alerts'].append(f'窗口剩余仅 {remaining} 天（上限 {window_max}）')
+
+    # ── 单次尺 ──
+    if current is not None and single > 0:
+        entry = d(current['entry'])
+        # 同池其它行程已用（剔除当前这条：按国家粒度剔除等价于按记录剔除）
+        others = set()
+        for t in trips:
+            tc = (t.get('country') or '').strip().upper()
+            if tc == country and not t.get('exit'):
+                continue
+            if pool and tc and tc not in POOLS[pool]['members']:
+                continue
+            others |= occupied_days(t, today)
+        others_used = len(others & win)
+
+        if window_max > 0:
+            eff = max(min(single, window_max - others_used), 1)
+        else:
+            eff = single
+        last_allowed = entry + timedelta(days=eff - 1)
+        remaining = (last_allowed - today).days
+        remaining = remaining if remaining > 0 else 0
+        overdue = today > last_allowed
+
+        if overdue:
+            status = 'overdue'
+        elif remaining <= DANGER_DAYS:
+            status = 'danger'
+        elif remaining <= NEAR_DAYS:
+            status = 'near'
+        else:
+            status = 'normal'
+
+        out['single'] = {
+            'entry': entry.isoformat(),
+            'effective_days': eff,
+            'last_allowed_day': last_allowed.isoformat(),
+            'remaining_days': remaining,      # 不含今天的剩余可待天数
+            'overdue': overdue,
+        }
+        out['status'] = status
+        if overdue:
+            over_by = (today - last_allowed).days
+            out['alerts'].append(f'⚠️ 已超期 {over_by} 天（最晚离境日 {last_allowed.isoformat()}）——请立即离境或咨询移民律师')
+        elif remaining <= DANGER_DAYS:
+            out['alerts'].append(f'🔴 危险：只剩 {remaining} 天（最晚离境日 {last_allowed.isoformat()}）')
+        elif remaining <= NEAR_DAYS:
+            out['alerts'].append(f'🟠 临近：剩 {remaining} 天（最晚离境日 {last_allowed.isoformat()}）')
+    elif single > 0 and not current:
+        # 未来入境场景：as_of = 计划入境日
+        eff = max(min(single, window_max - used), 1) if window_max > 0 else single
+        out['single'] = {
+            'entry': as_of.isoformat(),
+            'effective_days': eff,
+            'last_allowed_day': (as_of + timedelta(days=eff - 1)).isoformat(),
+            'remaining_days': eff,
+            'overdue': False,
+            'note': '未来入境预估（按入境日窗口余量封顶）',
+        }
+        out['status'] = 'planning'
+
+    if not out['alerts']:
+        out['alerts'].append('✅ 状态正常')
+    return out
+
+
+def main():
+    if len(sys.argv) > 1:
+        payload = json.load(open(sys.argv[1], encoding='utf-8'))
+    else:
+        payload = json.load(sys.stdin)
+    print(json.dumps(run(payload), ensure_ascii=False, indent=2))
+
+
+if __name__ == '__main__':
+    main()
