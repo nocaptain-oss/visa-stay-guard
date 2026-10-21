@@ -355,3 +355,57 @@ lk-business-30-multi / lk-business-90 / lk-transit-2 / lk-transit-7。
 `laoevisa.gov.la/fee-calculator`（返回 000）。
 
 **扩展表现状**：**7 国 24 条**（JP 3 / AU 3 / TH 2 / PH 2 / AR 5 / MV 2 / LK 7）。
+
+---
+
+## 第九轮：尼泊尔旅游签三档（Chrome 破 TLS 指纹封锁的方法首次用于采集）
+
+### 尼泊尔（本轮增量）
+
+官网页 `https://www.immigration.gov.np/visa-fees-and-documents`（静态，162 KB 首页 + 74 KB 子页）。
+
+官方签证类型表第 3 行 `Tourist`：
+
+```
+Entry:  15 days - $30 / 30 days - $50 / 90 days - $125
+Extension: $3/day (min. 15 days), $5/day late fine, +$25 multi re-entry
+On-arrival or from missions abroad.
+Extension up to 150 days total per visa year (Jan-Dec)
+```
+
+两个关键点：
+
+1. **三档天数**是并列选项，不是「基础 + 延期」。15 天档和 90 天档差 6 倍预算，办错档位直接超期
+2. **150 天/签证年**是延期后的**累计上限**，且要按$3/天付费主动申请
+
+→ 入库 3 条，`stay_single` 分别取 15/30/90，**`stay_window` 保持 0**
+（不按 150 天算：150 天需付费延期才获得，按它算会高估 5～10 倍，直接害用户超期）。
+150 天口径写进 `notes`，用户明确说自己已延期时用 `visa_days` 覆盖。
+
+**「免签证费」未入库**：`/visa-exemption` 页只列了**外交/公务/公务普通护照**免签 30 天
+（China 在其中），普通护照无免签证费表述；全站搜 `gratis` / `free of charge` 均无命中。
+按纪律不收录未核验信息。
+
+### 方法收获：TLS 指纹拦截 ≠ 站点不可达
+
+印尼 `evisa.imigrasi.go.id` 此前连续多轮返回 `000`，本轮做了三层诊断：
+
+| 手段 | 结果 |
+|---|---|
+| `dig` | 正常解析到 CloudFront |
+| `nc -z host 443` | **TCP 三次握手成功** |
+| `curl` / `webfetch` / Chrome | 全部 `ERR_CONNECTION_RESET` |
+
+结论：不是 DNS、不是端口、不是站点宕机，是**握手阶段被 RST**（TLS 指纹或 SNI 命中规则）。
+用 `curl -k --tlsv1.2 --http1.1` 换 UA 也无效 → 本地网络对该域名做了阻断，**无解，记录在案**。
+
+反向收获：同一条网络下 `www.immigration.gov.np`（尼泊尔）完全正常，
+说明「一批站点失败」不能一概归因为"这些国家不公开信息"，必须逐站分层诊断。
+
+### 仍未攻下
+
+越南 `evisa.gov.vn` / `thithucdientu.gov.vn`（均为 5.8 KB SPA 空壳）、
+韩国 `visa.go.kr`（菜单走 `/openPage.do?MENU_ID=xxx`，但内容由 AJAX 二次加载）、
+印尼（网络层阻断）、马来西亚、老挝（`/fee-information` 404，`/fee-calculator` 000）。
+
+**扩展表现状**：**8 国 27 条**（JP 3 / AU 3 / TH 2 / PH 2 / AR 5 / MV 2 / LK 7 / NP 3）。
