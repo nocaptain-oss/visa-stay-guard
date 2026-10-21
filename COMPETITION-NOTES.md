@@ -295,3 +295,63 @@ SA/MX 的中国使馆 sourceUrl 是新闻列表页，不含签证条款）。这
 ```
 
 第 2 步是上一轮缺失的关键环节——跳过它直接下「无增量」结论，正是被用户指出的问题。
+
+---
+
+## 第八轮：斯里兰卡 ETA 多档位（webfetch 首次穿透政府站）
+
+**背景**：继续按「能抓一个是一个」推进，目标是最难啃的 SPA / 反爬站点。
+
+### 斯里兰卡（本轮唯一增量，但增量很大）
+
+两个页面都是静态 JSP，`curl` + 常规 UA 直接可取，此前未被覆盖属遗漏：
+
+- 中心页 `https://www.eta.gov.lk/slvisa/visainfo/center.jsp?locale=en_US`
+- 费用与类型页 `https://www.eta.gov.lk/slvisa/visainfo/fees.jsp?locale=en_US`（73 KB）
+
+**核心发现（中心页原话，逐字）**：
+
+> tourists of above 40 countries are entitled to a Tourist visa (ETA) free of charge
+> valid for 30 days, with double-entry permitted from the date of first arrival in
+> Sri Lanka during the second entry only the balance period of the 30 days will be granted.
+
+这句话直接推翻了 dataset 的口径。`rules-data.json` 里 LK 是 `staySingle: 30, stayWindow: 0`
+——**每次入境 30 天**。但官方写的是：30 天**从首次入境日起算**，两次入境**共享**，
+第二次入境只给余额。同一趟行程里中途去马尔代夫再回来，不会重新获得 30 天。
+
+→ 扩展表按 `stay_window: 30` 收录，走窗口封顶逻辑（t3/t6/t8 已验证该逻辑）。
+
+**费用页给出的完整档位**（非南亚国家口径）：
+
+| 类型 | 停留 | 入境次数 | 费用 |
+|---|---|---|---|
+| 旅游签 ETA | 30 天 | 双次（共享窗口） | **免费**（中国在 40 国名单，2026-05-25 起） |
+| 旅游签 | up to 90 天 | 单次 / 双次 | US$50 + 签证费（双次 2 倍） |
+| 旅游签 | 一次性连续 180 天 | 单次 | US$50 总额 |
+| 商务签 | 30 天 | 多次 | US$55 |
+| 商务签 | up to 90 天 | 单/双/多次 | US$55（费按次数递增） |
+| 过境签 | 2 天 | 单次 | 免费 |
+| 过境签 | 3–7 天 | 单次 | US$20 |
+
+按保守纪律：`up to 90` 标 `confidence: medium`（上限非固定值，以签证页为准）；
+过境 3–7 天取**下限 3 天**。
+
+**本轮入库 7 条**：lk-eta-tourist-30-double / lk-tourist-90 / lk-tourist-180 /
+lk-business-30-multi / lk-business-90 / lk-transit-2 / lk-transit-7。
+
+### 两个「抓到了但无增量」的站点（已结案，不再重试）
+
+| 站点 | 结果 |
+|---|---|
+| 肯尼亚 `etakenya.go.ke` | 详情页正文只有导航与入口卡片，`General Information` 页未渲染出签证类型/天数 |
+| 埃及 `visa2egypt.gov.eg` | `How to Apply` 页只有 9 步申请流程，无单次/多次分档与天数 |
+
+→ 这两个国家的类型分档信息不在公开静态页，需登录后才能看到 → **放弃，不再投入**。
+
+### 仍未攻下的（下一轮候选）
+
+越南 `evisa.gov.vn`（证书链错误，`curl -k` 后仍是 SPA 空壳）、马来西亚、韩国
+`visa.go.kr`（渲染后只有导航框架）、印尼、尼泊尔（连接失败）、老挝
+`laoevisa.gov.la/fee-calculator`（返回 000）。
+
+**扩展表现状**：**7 国 24 条**（JP 3 / AU 3 / TH 2 / PH 2 / AR 5 / MV 2 / LK 7）。
