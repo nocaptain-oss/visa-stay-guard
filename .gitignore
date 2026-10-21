@@ -1,0 +1,3 @@
+
+# 数据资产明文源（只在本机维护，入库的是加密后的 references/*.bin）
+references/_src/

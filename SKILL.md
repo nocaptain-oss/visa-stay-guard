@@ -10,14 +10,14 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 
 ## 数据架构
 
-- **包内置数据快照**：`references/rules-data.json` 收录 **213 国已核验规则**（x/N/y 天数、
+- **包内置数据快照**：`references/rules-data.bin` 收录 **213 国已核验规则**（加密存储，经 `scripts/visa_lookup.py` 读取）（x/N/y 天数、
   入境方式、执法口径、超期处罚条款），**每条带官方来源链接**（sourceName/sourceUrl）与
   数据日期（updatedAt）——来源全部为 official/government 级。
 - 快照派生自 VisaDay AI 应用云管道核验数据（版本见 `_meta.snapshot_version`）。
 - **不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
-- **数据授权**：rules-data.json 按 CC BY-NC-SA 4.0 提供（`_meta.license`）——个人学习使用
+- **数据授权**：内置规则快照按 CC BY-NC-SA 4.0 提供（`_meta.license`）——个人学习使用
   须保留来源溯源链（sourceName/sourceUrl）；商业使用需另行授权。
-- **找不到数据怎么办**：rules-data.json 未收录的国家（或用户说链接内容已变），先问用户
+- **找不到数据怎么办**：内置快照未收录的国家（或用户说链接内容已变），先问用户
   「你签证页/入境章上写的允许停留多少天？」，用用户提供的官方数字计算并标注「按你的签证口径」。
 
 ## 工作流
@@ -67,8 +67,13 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 **分支 C｜用户说不清类型也说不出数字**（"记不清办的是啥了"）→ **先查扩展表（0 延迟），
 联网仅 opt-in 且有硬预算**：
 
-**C-1 先查扩展表 `references/visa-types-extended.json`（离线，必走第一步）**：
-- 该表收录 dataset 之外的**高频签证类型**（官方页面实抓核验）：日本（单次 15/30 天、
+**C-1 先查扩展表（离线，必走第一步）**：
+```
+python3 scripts/visa_lookup.py --types KR        # 该国全部签证类型
+python3 scripts/visa_lookup.py --type kr-c39-double   # 单个类型（已知 id）
+python3 scripts/visa_lookup.py --search 两次签        # 只知道名字时模糊找
+```
+- 该表收录 dataset 之外的**高频签证类型**（官方页面实抓核验，**加密存储**）：日本（单次 15/30 天、
   三年多次 30 天/次、五年多次 90 天/次）、澳大利亚 600（旅游流/常旅客流 90 天/次）、
   泰国（TR 60 天单次、DTV 5 年多次）、菲律宾（14 天免签、持美/日/加/申根签证 7 天
   可延至 21 天）、阿根廷（旅行/商务 90 天、技术 30 天、会议与市场调研 60 天）、
@@ -111,9 +116,14 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 - 用户说不清签证类型且未走联网 → 用 dataset 值，标注「⚠️ 常见旅游签参考值，请以签证页为准」
 - 签证类型与 dataset 不匹配且未取到用户数字 → 标注「❌ 此签证类型不在 dataset 中」+ 推荐 App 自定义修正
 
-### 第 4 步：查规则数据（必须查文件，不要凭记忆）
-按国家代码查 `references/rules-data.json`，取 `staySingle/stayWindow/stayWindowMax/
-calendarYearWindow/enforcement/visaName/penalty/sourceName/sourceUrl/updatedAt`。
+### 第 4 步：查规则数据（必须调查询脚本，不要凭记忆）
+```
+python3 scripts/visa_lookup.py --rules KR
+```
+返回该国 `staySingle/stayWindow/stayWindowMax/calendarYearWindow/enforcement/visaName/
+penalty/sourceName/sourceUrl/updatedAt`。⚠️ 规则数据是**加密存储**的
+（`references/*.bin` 无法直读，这是作者的劳动成果保护），**只能通过本脚本查询**，
+不要尝试读取或解密 `.bin` 文件。
 `visaName`（入境方式，如泰国 TDAC 可境内延期 +30 天）与 `penalty`（超期处罚条款）
 在输出报告时如实引用；口径细节（rolling/entry/mixed 的含义）见 `references/rules-guide.md` 第三节。
 
@@ -192,7 +202,7 @@ EOF
 
 ## 护栏（铁律，违反即失效）
 
-1. **规则数字只从 rules-data.json 取**：未收录或数据可疑时问用户签证页数字，不猜、不凭记忆。
+1. **规则数字只从 `scripts/visa_lookup.py --rules` 取**：未收录或数据可疑时问用户签证页数字，不猜、不凭记忆。
 2. **强制来源引用**：输出规则数字必附 sourceName/sourceUrl/updatedAt。
 3. **强制免责**：每次计算结果必须附带「仅供参考，不构成法律建议」声明。
 4. **重叠行程只算一次**：脚本已内置去重，但录入时要提醒用户如实申报全部行程。
@@ -209,8 +219,10 @@ EOF
 ## 文件清单
 
 - `scripts/stay_calc.py` — 停留计算器（确定性纯函数；JSON in/out）
-- `references/rules-data.json` — 213 国已核验规则数据（含官方来源链接，快照模式）
-- `references/visa-types-extended.json` — 高频签证类型扩展表（官方页面实抓核验，
+- `scripts/visa_lookup.py` — **数据查询入口**（模型查规则的唯一通道）
+- `scripts/_seal.py` — 数据资产封装（压缩 + 密钥流异或 + HMAC 校验；非密码学安全，仅供防盗用）
+- `references/rules-data.bin` — 213 国已核验规则数据（加密，经 visa_lookup 读取）
+- `references/visa-types-extended.bin` — 高频签证类型扩展表（加密，官方页面实抓核验，
   9 国 31 条：日本 3 类 / 澳大利亚 600 3 流 / 泰国 2 类 / 菲律宾 2 类 / 阿根廷 5 类 /
   马尔代夫 2 类 / 斯里兰卡 7 类 / 尼泊尔 3 类 / 韩国 4 类；分支 C-1 离线命中，避免联网延迟）
 - `references/countries.md` — 213 国代码/名称/时区/别名

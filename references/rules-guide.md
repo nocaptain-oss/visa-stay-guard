@@ -10,16 +10,16 @@
 
 - **滚动窗口**（默认）：窗口 = 「从今天往回数 N 天，含今天」。额度占用逐日滑出窗口、逐日回补。
 - **无窗口国家**（N/y 为 0，如日本）：只看单次上限。
-- 规则数字一律查 `references/rules-data.json`（按 countryCode），**不要凭记忆引用**。
+- 规则数字一律查 `python3 scripts/visa_lookup.py --rules <国家码>`，**不要凭记忆引用**。
 
 ## 二、数据架构与准确性保障
 
-- **数据来源**：`rules-data.json` 是 VisaDay AI 应用云管道核验数据的快照（213 国，
+- **数据来源**：内置规则快照（`references/rules-data.bin`，加密存储）是 VisaDay AI 应用云管道核验数据的快照（213 国，
   sourceTier 全部 official/government，逐条带 sourceName/sourceUrl/updatedAt）。
 - **快照模式**：签证规则变化频率低，包内置快照 + 逐条数据日期 + 官方链接兜底时效性。
 - **强制引用**：输出任何规则数字时必须附 `sourceName + sourceUrl + updatedAt`，
   让用户点官方链接二次验证——这是本 Skill 的可信度根基。
-- **数据边界**：快照版本日期见 `rules-data.json` 的 `_meta.snapshot_version`（2026-10-11）。
+- **数据边界**：快照版本日期见 `python3 scripts/visa_lookup.py --meta` 输出的 `snapshot_version`（2026-10-11）。
   若用户报告与官方页面不一致，**以官方页面为准**，并建议用户按官方数字手动修正 rules 参数重算。
 
 ## 三、执法口径（enforcement 字段，37 国已标注）
@@ -67,10 +67,10 @@ Skill 的价值是「教育用户看签证页 + 快速估算」，App 的价值�
 
 ## 六、护栏铁律（必须遵守）
 
-1. **规则数字只从 rules-data.json 取**：未收录或数据可疑时问用户签证页数字，不猜、不凭记忆。
+1. **规则数字只从 `scripts/visa_lookup.py --rules` 取**：未收录或数据可疑时问用户签证页数字，不猜、不凭记忆。
 2. **强制来源引用**：每次输出规则数字附 sourceName/sourceUrl/updatedAt。
 3. **强制免责**：每次计算结果必须附带——「本计算仅供参考，不构成法律建议；请以边检入境章与使领馆官方信息为准。」
 4. **enforcement 双口径并示**：entry/mixed 口径国家不能只报窗口计算结果。
-5. **超期场景**：引用 rules-data.json 的 penalty 字段如实告知处罚（罚款/禁入境/拘留），
+5. **超期场景**：引用快照的 penalty 字段如实告知处罚（罚款/禁入境/拘留），
    建议咨询专业人士，不淡化。
 6. **签证类型透明**：不伪装成全知，置信度标签不可省略。
