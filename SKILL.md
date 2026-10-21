@@ -26,6 +26,51 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 
 ## 工作流
 
+### 第 0 步：先分清用户在问哪件事
+
+同一个国家会被问成四种完全不同的东西，别一律套「算天数」的流程：
+
+| 用户问法 | 走哪里 |
+|---|---|
+| 「要签证吗」「免签吗」「需要准备什么」 | **分支 V（本节下方）**，不进行程，10 秒答完 |
+| 「能待几天」「什么时候必须走」 | 第 1→6 步 |
+| 「我额度还剩多少」「还能再待多久」 | 第 2→6 步（行程是必填） |
+| 「我超期了怎么办」 | 第 2→6 步，结论里必须引用 `penalty` |
+
+一条消息里同时问了两类（「免签吗？能待多久？」），先答签证需求再答天数。
+
+#### 分支 V：签证需求（`entryKind`）
+
+**判据是 `entryKind`，不是 `staySingle`。** 天数为 0 不等于不用签证（见 C-1c），
+反过来免签也可能只有 15 天。`python3 scripts/visa_lookup.py --rules KR` 取 `entryKind` 后按下表翻译：
+
+| `entryKind` 片段 | 播报用词 |
+|---|---|
+| `visa_free` | 免签入境 |
+| `evisa` | 需提前在线申请电子签 |
+| `visa` / `visa_required` | 需办理签证 |
+| `visa_on_arrival` | 落地签（抵达后现场办理） |
+| `eta` / `eTAS` | 需办电子旅行许可（ETA） |
+| `Entry Permit` | 需办入境许可 |
+| `Conditional Visa-Free` | 有条件免签（须满足特定条件，如持第三国有效签证） |
+| `港澳通行证` | 需港澳通行证 + 签注 |
+| `大陆往来台湾通行证 + 入台证` | 需大通证 + 入台证（两证齐全） |
+
+带斜杠的是「多种方式并存」，按斜杠拆开逐段翻译后用「或」连接。例如
+`visa_free/evisa` → 「免签入境，或提前申请电子签」；`visa/Conditional Visa-Free` →
+「需办理签证；满足特定条件时可免签」。**不要只报第一种**——用户可能就是靠第二种入境的。
+
+播报格式（答完签证需求顺手给天数，用户下一句一定会问）：
+
+```
+{国家}：{签证需求}。{停留上限一句话}。
+规则来源：{sourceName} {sourceUrl}（数据日期 {updatedAt}）
+本计算仅供参考，不构成法律建议。
+```
+
+`{停留上限一句话}` 优先用 `staySingle`/`stayWindowMax` 拼（「单次最多 30 天，180 天内累计不超 90 天」）；
+两者都为 0 时按 C-1c 处理，说「停留上限未收录，请以签证页为准」，**不要说 0 天**。
+
 ### 第 1 步：定位国家与池
 用户提到国家、城市名时，查 `references/countries.md` 解析出 ISO 代码与 IANA 时区
 （别名表含城市名，如"巴黎"→ FR）。再查 `references/pools.md` 判断是否属于共享天数池。
@@ -63,7 +108,10 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
 2. 「有没有滚动统计窗口？比如申根是 180 天内累计不超 90 天。没有就说没有」→
    有 → `stay_window`（窗口跨度）/ `stay_window_max`（窗口内累计上限）；没有 → 两项都填 0
 3. 「额度是每年 1 月 1 日清零，还是滚动着算？」→ 自然年清零填 `calendar_year_window: true`
-   （此时 `stay_window` 填 0）；滚动填 false
+   （此时 `stay_window` 填 0，**但 `stay_window_max` 要填年度累计上限，不能填 0**——
+   填 0 会让年度限额整段失效，脚本会报「录入疑点」）。例：印度 e-旅游单次 90、日历年内累计
+   180 → `stay_single=90, stay_window=0, stay_window_max=180, calendar_year_window=true`。
+   滚动填 false
 4. 用户答不出的项**不要猜**：能从官方页面查到的走分支 C，查不到的按 dataset 值兜底并标注
 - 录入完成传 `visa_source: "user_rules"`（脚本自动跑四元组合理性校验，录反/漏项会报
   「录入疑点」，向用户转述复核后再计算）
@@ -91,6 +139,13 @@ python3 scripts/visa_lookup.py --search 两次签        # 只知道名字时模
 - 命中后：条目 `confidence: high` → `visa_source: "extended"`（脚本映射 high）；
   条目 `confidence: medium`（如 DTV 的 180 天为 FAQ 口径）→ `visa_source: "web"` +
   `web_source: {name: 条目.source, url: 条目.sourceUrl, date: 条目.verified_at}`（映射 medium）
+- **规则字段原样透传**：条目里的 `stay_single` / `stay_window` / `stay_window_max` /
+  `calendar_year_window` 与 `stay_calc.py` 的 `rules` 同名同义，直接搬过去，
+  **不要改成驼峰、不要自己换算**（`--rules` 返的是驼峰，`stay_calc` 吃的是下划线，两套别混）
+- 条目 `notes` 里常有关键限制，播报要带上：如印度「两次访问之间须间隔 2 个月」、
+  斯里兰卡「ETA 两次共享 30 天窗口」，这类比天数更容易踩坑
+- 条目有 `entries` 字段且不为 `—` 时，顺带播报入境次数：`single` 单次 / `double` 两次 /
+  `multiple` 多次。用户问「我这个能多次入境吗」时这是唯一依据，别用 `stay_window` 推断
 - 播报标注：「✅ 官方类型数据（{type}，{source} {verified_at}）」
 
 **C-1b 聚合表（`tier: "aggregated"`）—— 命中时必须降级播报**：
@@ -122,6 +177,9 @@ python3 scripts/visa_lookup.py --search 两次签        # 只知道名字时模
 - 这些条目**未逐条官方直抓**（官方页多为 SPA / 302 / 不可达，见 `_meta.blocked_official_sources`），
   全部 `confidence: low` + `needs_official_check: true`
 - 命中后：`visa_source: "aggregated"` → 脚本恒输出 `confidence: low`
+- **规则字段原样透传**（同上）：`stay_single` / `stay_window` / `stay_window_max` /
+  `calendar_year_window` 直接填进 `rules`。聚合表里日历年条目的 `stay_window` 常写成 365，
+  这是「窗口长度 = 一年」的等价写法，脚本认，不用改。
 - 播报标注（**强制，不得省略**）：
   「📋 聚合整理数据（{type}）—— 多源交叉整理，**未逐条官方核验**；请以签证页与使馆口径为准」
   ⚠️ 禁用「✅ 官方类型数据」字样，禁用「官方核验」表述
@@ -174,10 +232,20 @@ python3 scripts/visa_lookup.py --search 两次签        # 只知道名字时模
 ```
 python3 scripts/visa_lookup.py --rules KR
 ```
-返回该国 `staySingle/stayWindow/stayWindowMax/calendarYearWindow/enforcement/visaName/
+国家参数支持 2 位代码、中文名、英文名、别名与城市名（`日本` / `UK` / `东京` / `迪拜`
+脚本内部都会解析成代码），所以不必先查 countries.md 再拼代码。
+
+返回该国 `staySingle/stayWindow/stayWindowMax/calendarYearWindow/entryKind/enforcement/visaName/
 penalty/sourceName/sourceUrl/updatedAt`。⚠️ 规则数据是**加密存储**的
 （`references/*.bin` 无法直读，这是作者的劳动成果保护），**只能通过本脚本查询**，
 不要尝试读取或解密 `.bin` 文件。
+
+**`found: false` 不等于「该国没数据」**，按顺序排查：
+1. 国家名没识别 → 换 ISO 两位代码重试一次
+2. `--types` 返回 false 是**正常的**：类型表只收「同一护照多类型且天数不同」的国家，
+   免签国与统一口径国（申根/美国/英国）故意不重复收录，此时走 `--rules`
+3. 两步都 false 才是真未收录 → 按第 24 行问用户签证页数字
+
 `visaName`（入境方式，如泰国 TDAC 可境内延期 +30 天）与 `penalty`（超期处罚条款）
 在输出报告时如实引用；口径细节（rolling/entry/mixed 的含义）见 `references/rules-guide.md` 第三节。
 
@@ -201,11 +269,18 @@ EOF
 - `today` 必须是**目的地时区**的日历日（用户说"今天"时先换算时区）
 - 未来入境预估：`as_of` 填计划入境日，`trips` 只放**已发生**的历史行程
   （还没发生的计划行程不传，当前在途行程也不存在）
+  - 用户没说下次什么时候去 → `as_of` 留空。此时 `bottom_line` 是「**若今天入境**
+    最多可待 X 天」，如实转述，**不要改写成「计划某日入境」**（已离境用户会误读）
+  - `as_of` 早于 `today` 会触发「时间基准错位」alert，先核对是不是把历史入境日填进去了
 - 用户口述过总数时，`reported_days` 填该数字（见第 2 步）
 - 结构化录入（第 3 步分支 B）时传 `visa_source: "user_rules"`；扩展表命中（分支 C-1）
   传 `"extended"`；聚合表命中（分支 C-1b）传 `"aggregated"`（脚本恒输出 low）；
   联网兜底（分支 C-2）传 `"web"` + `web_source: {name, url, date}`
   ——脚本会跑四元组与行程日期校验
+- **日期格式**：脚本接受 `2026-03-01` / `2026/3/1` / `2026.3.1` / `2026年3月1日` /
+  `20260301`。缺年份的「3月1日」和相对说法（「下个月」「月底」）**无法计算**——先向用户
+  确认年份与具体日期，不要自己补。输入错误时脚本返回 `status: "error"` + `hint`，
+  照着 hint 修正重跑，别改用心算。
 - **播报"还能待几天"只允许两个来源**：`bottom_line`（一句话结论，首选）或
   `single.remaining_days`。**严禁用 `single.effective_days`**——那是"本次入境的总额度"
   （已被窗口余量封顶过的上限），不是"剩余天数"；两者数值常相差数倍。
@@ -292,6 +367,11 @@ EOF
    （Chrome `--virtual-time-budget=5000`），超时立即降级不重试；slow path 必须先播报
    参考值和进度，杜绝静默等待（C 端 3 秒无输出即流失）；第一跳锚定 dataset sourceUrl，
    结果带 name/url/date，置信度不高于 high。
+8. **国家标识**：`--rules` / `--types` 支持中文名与别名（脚本内置解析）。`found: false`
+   先换代码重试一次再判断未收录；`--types` 为 false 只表示「不在这张多类型表里」，
+   不能当「没有规则」。
+9. **自然年模式必须带年度上限**：`calendar_year_window: true` 时 `stay_window_max`
+   要填年度累计上限。填 0 会让年度限额整段失效（偏危险方向，会多算天数），脚本会报疑点。
 
 ## 文件清单
 

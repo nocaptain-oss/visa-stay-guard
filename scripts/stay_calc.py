@@ -71,7 +71,24 @@ POOLS = {
 
 
 def d(s):
-    return date.fromisoformat(s) if s else None
+    """宽容的日期解析：YYYY-MM-DD / YYYY/M/D / YYYY.M.D / YYYY年M月D日 / YYYYMMDD。
+
+    模型把用户口语（「3 月 1 号」）转成非 ISO 写法是常事，入口容错比让脚本崩掉可靠。
+    缺年份的写法（「3月1日」）无法猜，仍抛 ValueError，由 main 兜成 JSON 错误。"""
+    if not s:
+        return None
+    if isinstance(s, date):
+        return s
+    t = str(s).strip()
+    for sep in ('年', '月', '日'):
+        t = t.replace(sep, '-')
+    t = t.replace('/', '-').replace('.', '-').rstrip('-')
+    if len(t) == 8 and t.isdigit():
+        return date(int(t[:4]), int(t[4:6]), int(t[6:]))
+    parts = [p for p in t.split('-') if p]
+    if len(parts) == 3 and all(p.isdigit() for p in parts):
+        return date(*(int(p) for p in parts))
+    return date.fromisoformat(t)
 
 
 def pool_of(code):
@@ -132,18 +149,26 @@ def validate_rules(single, window_n, window_max, cal_year, source):
     if window_max > 0 and window_n <= 0 and not cal_year:
         warns.append('⚠️ 录入疑点：有窗口累计上限但没有窗口跨度（也非自然年模式）——'
                      '滚动窗口需要 N 天跨度，如申根 180')
-    if cal_year and window_n > 0:
+    if cal_year and window_n not in (0, 365):
+        # 365 是「日历年」的等价写法（聚合表数据就是这么存的），不冲突
         warns.append('⚠️ 录入疑点：自然年模式下 stay_window 应为 0（每年 1 月 1 日清零，'
-                     '无滚动跨度概念）')
+                     '无滚动跨度概念）；填 365 也可接受，其它值请复核')
+    if cal_year and window_max <= 0:
+        warns.append('⚠️ 录入疑点：标了自然年模式但窗口累计上限是 0——年度额度限制不生效，'
+                     '结果会把年度上限漏掉（如印度 e-旅游单次 90 天、日历年累计 180 天，'
+                     '应填 stay_window_max=180）')
     if window_n > 0 and window_n > 400 and source in ('user_rules', 'user'):
         warns.append(f'⚠️ 录入疑点：窗口跨度 {window_n} 天超过 1 年——罕见口径，请复核'
                      f'（是否把天数录成了月数？如 10 个月应为 300 天左右）')
     return warns
 
 
-def validate_trips(trips, today):
+def validate_trips(trips, today, as_of=None):
     """行程日期防呆：倒置 / 未来日期 / 缺字段。返回警告列表。"""
     warns = []
+    if as_of is not None and as_of < today:
+        warns.append(f'⚠️ 评估日 as_of={as_of} 早于今天 today={today}——「未来入境预估」'
+                     f'必须填计划入境日，不要把历史入境日填进 as_of；本次结果的时间基准可能错位')
     for i, t in enumerate(trips, 1):
         tc = (t.get('country') or '??').strip().upper()
         entry = d(t.get('entry'))
@@ -248,7 +273,7 @@ def run(payload):
 
     # 规则四元组合理性 + 行程日期防呆（结构化录入的机器校验层）
     out['alerts'].extend(validate_rules(single, window_n, window_max, cal_year, rules_source))
-    out['alerts'].extend(validate_trips(trips, today))
+    out['alerts'].extend(validate_trips(trips, today, as_of))
 
     # 用户口述总天数交叉校验（实战教训：用户说 60 天、日期算出 82 天，必须指出差异）
     reported = payload.get('reported_days')
@@ -269,7 +294,7 @@ def run(payload):
     # ── 窗口尺 ──
     if window_max > 0:
         remaining = max(window_max - used, 0)
-        win_info = {'used': used, 'remaining': remaining,
+        win_info = {'used': used, 'remaining': remaining, 'cap': window_max,
                     'window_days': (0 if cal_year else window_n),
                     'mode': ('calendar_year' if cal_year else 'rolling')}
         if cal_year:
@@ -368,7 +393,14 @@ def run(payload):
                                   f'还能再待 {s["remaining_days"]} 天（不含今天）')
     elif s is not None:  # planning（未来入境预估）
         capped = '（按入境日窗口余量封顶）' if window_max > 0 else ''
-        out['bottom_line'] = (f'计划 {s["entry"]} 入境，本次最多可待 {s["effective_days"]} 天，'
+        # as_of 缺省等于 today 时不能称「计划今天入境」——已离境用户问「下次能待多久」会误读
+        if as_of > today:
+            lead = f'计划 {s["entry"]} 入境'
+        elif as_of == today:
+            lead = f'若今天（{s["entry"]}）入境'
+        else:
+            lead = f'若 {s["entry"]} 入境'
+        out['bottom_line'] = (f'{lead}，本次最多可待 {s["effective_days"]} 天，'
                               f'最晚 {s["last_allowed_day"]} 离境{capped}')
     elif out['window'] is not None:
         w = out['window']
@@ -383,11 +415,21 @@ def run(payload):
 
 
 def main():
-    if len(sys.argv) > 1:
-        payload = json.load(open(sys.argv[1], encoding='utf-8'))
-    else:
-        payload = json.load(sys.stdin)
-    print(json.dumps(run(payload), ensure_ascii=False, indent=2))
+    try:
+        if len(sys.argv) > 1:
+            payload = json.load(open(sys.argv[1], encoding='utf-8'))
+        else:
+            payload = json.load(sys.stdin)
+        result = run(payload)
+    except Exception as e:  # noqa: BLE001 — 任何输入错误都要变成模型能读的 JSON
+        result = {
+            'status': 'error',
+            'bottom_line': '输入有误，无法计算——请按 SKILL.md 第 5 步的字段格式重传',
+            'alerts': [f'❌ {type(e).__name__}: {e}'],
+            'hint': '日期必须能解析成具体某一天（如 2026-03-01）。「3月1日」缺年份、'
+                    '「下个月」这类相对说法无法计算，先向用户确认年份与具体日期。',
+        }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':

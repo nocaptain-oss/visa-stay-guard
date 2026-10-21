@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import os
 import sys
 
 import _seal
@@ -21,9 +22,58 @@ import _seal
 _rules_cache = None
 _ext_cache = None
 _agg_cache = None
+_cc_cache = None
 
 # 聚合表条目必须随结果一起播报的免责口径（SKILL.md 对应章节依赖此字段）
 _WARN = "数据为 AI 聚合整理（confidence=low），未逐条官方直抓；请以签证页与使馆官方口径为准。"
+
+
+def _countries():
+    """别名索引：中文名 / 英文名 / 别名 / 城市名 → ISO 代码。
+
+    读 references/countries.md 的 5 列表格。模型传「日本」「UK」这类非代码值时，
+    在这里解析掉——查询入口是唯一通道，容错放在入口比写在 SKILL.md 里可靠。"""
+    global _cc_cache
+    if _cc_cache is not None:
+        return _cc_cache
+    idx = {}
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "references", "countries.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if len(cells) != 5:
+                    continue  # 排除页内其它小表格
+                code = cells[0]
+                if len(code) != 2 or not code.isupper() or not code.isascii():
+                    continue
+                for col in (cells[1], cells[2], cells[4]):
+                    for key in [col] + col.split("、"):
+                        key = key.strip().lower()
+                        if key:
+                            idx.setdefault(key, code)
+    except OSError:
+        pass
+    _cc_cache = idx
+    return idx
+
+
+def resolve_cc(raw):
+    """国家标识 → ISO 代码。接受 2 位代码 / 中文名 / 英文名 / 别名 / 城市名。"""
+    s = (raw or "").strip()
+    if not s:
+        return s
+    idx = _countries()
+    low = s.lower()
+    if low in idx:
+        return idx[low]  # 别名优先：UK → GB、东京 → JP
+    if len(s) == 2 and s.isascii() and s.isalpha():
+        return s.upper()
+    hits = {v for k, v in idx.items() if low in k}  # 只做「输入是别名子串」单向匹配
+    if len(hits) == 1:
+        return hits.pop()
+    return s
 
 
 def _rules():
@@ -102,19 +152,24 @@ def main():
         return
 
     if a.rules:
-        cc = a.rules.upper()
+        cc = resolve_cc(a.rules)
         for entry in _rules().get("entries", []):
             if entry.get("countryCode") == cc:
-                out({"found": True, "entry": entry})
+                out({"found": True, "countryCode": cc, "entry": entry,
+                     **({"resolvedFrom": a.rules} if cc != a.rules else {})})
                 return
-        out({"found": False, "countryCode": cc})
+        out({"found": False, "countryCode": cc, "input": a.rules,
+             "hint": "国家名未识别为该表条目。先试 ISO 两位代码（如 JP/GB），"
+                     "仍为 false 才是真未收录——不要凭这个 false 下「没有数据」的结论。"})
         return
 
     if a.types:
-        cc = a.types.upper()
+        cc = resolve_cc(a.types)
         types = _merged_types(cc)
         if not types:
-            out({"found": False, "countryCode": cc})
+            out({"found": False, "countryCode": cc, "input": a.types,
+                 "hint": "该国不在两级类型表中（类型表只收「同一护照多类型且天数不同」的国家，"
+                         "免签国与统一口径国故意不重复收录）——这不代表没有停留规则。"})
             return
         name = next((doc["countries"][cc].get("countryName")
                      for doc in (_ext(), _agg()) if cc in doc.get("countries", {})), None)
