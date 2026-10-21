@@ -1,0 +1,9 @@
+{
+  "country": "ES",
+  "today": "2026-04-17",
+  "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+  "trips": [
+    {"country": "FR", "entry": "2025-11-17", "exit": "2026-01-08"},
+    {"country": "ES", "entry": "2026-03-24", "exit": null}
+  ]
+}

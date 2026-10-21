@@ -1,0 +1,7 @@
+{"country": "TH", "today": "2026-10-21",
+ "rules": {"stay_single": 30, "stay_window": 180, "stay_window_max": 90},
+ "trips": [
+   {"country": "TH", "entry": "2026-05-01", "exit": "2026-05-30"},
+   {"country": "TH", "entry": "2026-08-10", "exit": "2026-09-08"},
+   {"country": "TH", "entry": "2026-10-01", "exit": null}
+ ]}

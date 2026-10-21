@@ -1,0 +1,3 @@
+{"country": "JP", "today": "2026-10-24",
+ "rules": {"stay_single": 15, "stay_window": 0, "stay_window_max": 0},
+ "trips": [{"country": "JP", "entry": "2026-10-10", "exit": null}]}
