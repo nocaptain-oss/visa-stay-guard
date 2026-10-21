@@ -67,14 +67,13 @@ check("A4 不重复官方表已有天数", not dup, str(sorted(dup)))
 # A5 visa_lookup 必须合并两级并带免责声明
 r = subprocess.run(["python3", LOOKUP, "--types", "MM"], capture_output=True, text=True)
 o = json.loads(r.stdout)
-check("A5a --types MM 命中", o.get("found") is True and len(o["types"]) == 4, str(len(o.get("types", []))))
+check("A5a --types MM 命中", o.get("found") is True and len(o["types"]) == 5, str(len(o.get("types", []))))
 check("A5b --types 带 tier", all(t.get("tier") == "aggregated" for t in o["types"]))
 check("A5c --types 带 warning", "聚合整理" in o.get("warning", ""), o.get("warning", "")[:30])
 
-r = subprocess.run(["python3", LOOKUP, "--types", "MV"], capture_output=True, text=True)
-o = json.loads(r.stdout)
-tiers = sorted(t["tier"] for t in o["types"])
-check("A5d --types MV 两级合并", tiers == ["aggregated", "official", "official"], str(tiers))
+# 两级表国家集合必须互斥：同一国家只能用一种核验等级说话，避免「半官方半聚合」
+both = set(agg["countries"]) & set(ext["countries"])
+check("A5d 两级表国家互斥", not both, str(sorted(both)))
 
 r = subprocess.run(["python3", LOOKUP, "--type", "mm-tourist-voa"], capture_output=True, text=True)
 o = json.loads(r.stdout)
@@ -110,5 +109,25 @@ o = run({"country": "MM", "today": "2026-10-21", "rules": rule(voa),
 check("A7a MM 落地签 30 天：最晚 11-08", o["single"]["last_allowed_day"] == "2026-11-08", o["single"]["last_allowed_day"])
 check("A7b 同一入境日两档相差 2 天", voa["stay_single"] - mm["stay_single"] == 2,
       f"{voa['stay_single']}-{mm['stay_single']}")
+
+# A8 每个聚合国家必须至少有一条「真增量」条目（不是 dataset 副本），否则该国不该在表里
+ds = load("rules-data")
+ds_single = {e["countryCode"]: e.get("staySingle") for e in ds["entries"]}
+for code, c in agg["countries"].items():
+    real = [t for t in c["types"] if not t.get("duplicates_dataset")]
+    check(f"A8a {code} 至少一条真增量", bool(real), f"{len(real)}/{len(c['types'])}")
+    for t in c["types"]:
+        if t.get("duplicates_dataset"):
+            check(f"A8b {t['id']} 副本天数须等于 dataset",
+                  t["stay_single"] == ds_single.get(code),
+                  f"{t['stay_single']} vs {ds_single.get(code)}")
+
+# A9 dataset 同渠道同天数的条目必须标注，避免「假装增量」
+for code, c in agg["countries"].items():
+    dv = ds_single.get(code)
+    for t in c["types"]:
+        if t["stay_single"] == dv and not t.get("duplicates_dataset"):
+            check(f"A9 {t['id']} 与 dataset 同天数须显式说明", bool(t.get("notes")),
+                  "同天数但未标 duplicates_dataset，至少要在 notes 说明差异")
 
 print(f"\n{len(fails)} 失败"); sys.exit(1 if fails else 0)
