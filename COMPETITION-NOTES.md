@@ -409,3 +409,68 @@ Extension up to 150 days total per visa year (Jan-Dec)
 印尼（网络层阻断）、马来西亚、老挝（`/fee-information` 404，`/fee-calculator` 000）。
 
 **扩展表现状**：**8 国 27 条**（JP 3 / AU 3 / TH 2 / PH 2 / AR 5 / MV 2 / LK 7 / NP 3）。
+
+---
+
+## 第十轮：韩国（逆向 SPA 的 AJAX 接口，拿到官方结构化数据）
+
+韩国 `visa.go.kr` 是典型 SPA：首页 HTML 里所有菜单都是 `javascript:void(0)`，
+`--dump-dom` 只能拿到导航框架。此前多轮判定「抓不到」。
+
+**突破口**：页面 HTML 里残留了未被混淆的 AJAX 端点。
+
+```
+/biz/vg/vw/selectNatList.do        → 国家代码表（CHINA P. R. = 112）
+/biz/vg/vw/selectVisaWizardList.do → 按「国家 + 入境目的」返回签证类型
+/biz/vg/vw/detailSojQual.do        → 按「签证类型」返回停留期详情
+```
+
+直接 POST 会返回 `302`（缺表单标记）。真正的门槛在 `common.js` 的 `ComAjax` 构造器：
+
+```js
+this.cmmParam = "TRAN_TYPE=ComAjax&SE_FLAG_YN="+gfv_flagYn+"&LANG_TYPE="+gfv_seLang;
+```
+
+补上这三个参数 + `JSESSIONID` cookie 后，接口返回干净 JSON：
+
+```
+TRAN_TYPE=ComAjax&SE_FLAG_YN=N&LANG_TYPE=CH&IN_NAT_CD=112&IN_REP_ENTRY_PURP_CD=VC001
+```
+
+**中国公民（NAT_CD=112）旅游目的（VC001）返回 8 种类型**：
+B-1 免签证（外交/公务）、B-2-1 一般免签证、B-2-2 济州免签证、C-3-1 短期一般、
+C-3-2 团体观光、C-3-4 一般商务、C-3-6 短期商务、C-3-9 一般观光。
+
+再调 `detailSojQual.do` 拿停留期，得到 C-3-9 的三档：
+
+| 档位 | 有效期 | 单次停留 |
+|---|---|---|
+| 单次签 | 3 个月 | **90 天** |
+| 两次签 | 6 个月 | **30 天** |
+| 多次签 | 3 / 5 年 | 90 天/次 |
+
+**核心发现：两次签的停留期反而比单次签短 60 天。** 有效期从 3 个月延到 6 个月，
+单次停留却从 90 天砍到 30 天——最容易办错的一档，用户按「有效期更长＝能待更久」直觉规划必超期。
+
+另获 **B-2-1 一般免签证 30 天**（普通护照可用）：近 2 年出入境 ≥4 次或累计 ≥10 次
+且无违规记录；或持美/加/澳/新有效签证经韩赴第三国。这条此前完全没有出现在数据里。
+
+**B-2-2 济州免签未入库**：接口的 `MAIN_TARGET` 只写「可免签入境济州岛地区」，
+不含具体天数；`detailSojQual.do` 对 B-2 系列返回空数组（换 LANG_TYPE / 目的码组合均空）。
+按纪律不凭记忆填 30 天，记录在此待后续从济州道厅或法务部告示页补。
+
+### 方法沉淀（可复用）
+
+对 SPA 站点的抓取顺序，本轮验证有效：
+
+```
+1. curl 取首页 → 拿到 HTML（哪怕只是骨架）
+2. 在骨架里 grep  .do / api / url: / ajax  → 找端点
+3. grep 页面引用的 common.js / util.js → 找请求封装，看必填的公共参数
+4. 带 cookie jar 建会话 → 补公共参数 → POST
+5. 拿到 JSON 后再看字段名的语义（如 MAIN_SOJ_DUR_90UNDER_GB）
+```
+
+第 3 步是关键：`ComAjax` 的 `TRAN_TYPE=ComAjax` 这种参数，不读封装源码永远猜不到。
+
+**扩展表现状**：**9 国 31 条**（JP 3 / AU 3 / TH 2 / PH 2 / AR 5 / MV 2 / LK 7 / NP 3 / KR 4）。

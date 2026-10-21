@@ -101,4 +101,17 @@ o = run({"country": "PH", "today": "2026-10-21", "rules": rule(php),
 check("E8a PH 持美签 → 7 天", o["single"]["effective_days"] == 7, f"got={o['single']['effective_days']}")
 check("E8b PH 最晚离境 10-21（含入境当日）", o["single"]["last_allowed_day"] == "2026-10-21", o["single"]["last_allowed_day"])
 
+# E9 韩国 C-3-9：两次签 30 天 vs 单次签 90 天（反直觉，最容易办错档）
+kr1 = next(t for t in ext["countries"]["KR"]["types"] if t["id"] == "kr-c39-single")
+kr2 = next(t for t in ext["countries"]["KR"]["types"] if t["id"] == "kr-c39-double")
+o = run({"country": "KR", "today": "2026-10-21", "rules": rule(kr1),
+         "trips": [{"country": "KR", "entry": "2026-10-01", "exit": None}],
+         "visa_type": kr1["type"], "visa_source": "extended"})
+check("E9a KR 单次签 → 90 天", o["single"]["effective_days"] == 90, f"got={o['single']['effective_days']}")
+o = run({"country": "KR", "today": "2026-10-21", "rules": rule(kr2),
+         "trips": [{"country": "KR", "entry": "2026-10-01", "exit": None}],
+         "visa_type": kr2["type"], "visa_source": "extended"})
+check("E9b KR 两次签 → 30 天（不是 90）", o["single"]["effective_days"] == 30, f"got={o['single']['effective_days']}")
+check("E9c KR 两次签最晚离境 10-30", o["single"]["last_allowed_day"] == "2026-10-30", o["single"]["last_allowed_day"])
+
 print(f"\n{len(fails)} 失败"); sys.exit(1 if fails else 0)
