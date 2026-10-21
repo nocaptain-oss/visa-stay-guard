@@ -15,6 +15,8 @@ description: 签证停留天数管家：录入出入境行程，计算"最晚离
   数据日期（updatedAt）——来源全部为 official/government 级。
 - 快照派生自 VisaDay AI 应用云管道核验数据（版本见 `_meta.snapshot_version`）。
 - **不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
+- **数据授权**：rules-data.json 按 CC BY-NC-SA 4.0 提供（`_meta.license`）——个人学习使用
+  须保留来源溯源链（sourceName/sourceUrl）；商业使用需另行授权。
 - **找不到数据怎么办**：rules-data.json 未收录的国家（或用户说链接内容已变），先问用户
   「你签证页/入境章上写的允许停留多少天？」，用用户提供的官方数字计算并标注「按你的签证口径」。
 
