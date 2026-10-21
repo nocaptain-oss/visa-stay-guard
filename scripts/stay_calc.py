@@ -33,9 +33,11 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
   ],
   "as_of": null,                         // 可选：评估日（未来入境场景传计划入境日），默认 today
   "visa_type": "旅游签",                 // 可选：用户签证类型（旅游/商务/探亲/留学/其他）
-  "visa_source": "dataset",              // 可选：数据来源（dataset=dataset值 / user=用户签证页数字）
+  "visa_source": "dataset",              // 可选：dataset=快照值 / user=签证页单值 / user_rules=用户结构化整套 / web=联网检索
   "visa_days": null,                     // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
-  "reported_days": null                  // 可选：用户口述的"已待总天数"（用于与行程日期交叉校验）
+  "reported_days": null,                 // 可选：用户口述的"已待总天数"（用于与行程日期交叉校验）
+  "rules_source": null,                  // 可选：规则来源声明（user_rules/web），缺省随 visa_source 推断
+  "web_source": null                     // 可选：联网检索来源 {name,url,date}，visa_source=web 时必填
 }
 
 输出（stdout JSON）：含 `bottom_line`（一句话结论，AI 必须直接引用此字段向用户播报，
@@ -88,7 +90,7 @@ def same_pool(country, pool, tc):
 
 def occupied_days(trip, today):
     """一条行程占用的自然日集合（含入境当日；在途截至今天，离境日计入停留）。"""
-    entry = d(trip['entry'])
+    entry = d(trip.get('entry'))
     if entry is None:
         return set()
     exit_ = d(trip.get('exit'))
@@ -99,12 +101,63 @@ def occupied_days(trip, today):
 
 
 def window_dates(as_of, window_days, calendar_year):
-    """窗口自然日集合：滚动 = [as_of-(N-1), as_of]；自然年 = 当年 1月1日..as_of。"""
+    """窗口自然日集合：滚动 = [as_of-(N-1), as_of]；自然年 = 当年1月1日..as_of。"""
     if calendar_year:
         start = date(as_of.year, 1, 1)
     else:
         start = as_of - timedelta(days=window_days - 1)
     return {start + timedelta(days=i) for i in range((as_of - start).days + 1)}
+
+
+def validate_rules(single, window_n, window_max, cal_year, source):
+    """规则四元组合理性校验（结构化录入防呆）：返回警告列表。
+
+    source='dataset' 时只报硬错误（数据已核验过）；'user_rules'/'user' 时加
+    录入疑点提示（用户手抄官方页最容易录反/录漏）。"""
+    warns = []
+    if single <= 0 and window_max <= 0:
+        warns.append('❌ 单次上限与窗口上限均为 0——没有可计算的停留上限，'
+                     '请提供签证页上的停留天数（结构化录入见 SKILL.md 第 3 步）')
+        return warns
+    if window_max > 0 and single > window_max and source in ('user_rules', 'user'):
+        warns.append(f'⚠️ 录入疑点：单次上限 {single} 天 > 窗口累计上限 {window_max} 天'
+                     f'——单次额度实际会被窗口封顶为 {window_max} 天。'
+                     f'常见录入错误是把「x/N/y」顺序弄反（如申根应为 90/180/90），请复核')
+    if window_n > 0 and window_max <= 0:
+        warns.append(f'⚠️ 录入疑点：给了统计窗口 {window_n} 天但没有窗口累计上限——'
+                     f'窗口尺无法计算，请补「窗口内最多累计 y 天」')
+    if window_max > 0 and window_n <= 0 and not cal_year:
+        warns.append('⚠️ 录入疑点：有窗口累计上限但没有窗口跨度（也非自然年模式）——'
+                     '滚动窗口需要 N 天跨度，如申根 180')
+    if cal_year and window_n > 0:
+        warns.append('⚠️ 录入疑点：自然年模式下 stay_window 应为 0（每年 1 月 1 日清零，'
+                     '无滚动跨度概念）')
+    if window_n > 0 and window_n > 400 and source in ('user_rules', 'user'):
+        warns.append(f'⚠️ 录入疑点：窗口跨度 {window_n} 天超过 1 年——罕见口径，请复核'
+                     f'（是否把天数录成了月数？如 10 个月应为 300 天左右）')
+    return warns
+
+
+def validate_trips(trips, today):
+    """行程日期防呆：倒置 / 未来日期 / 缺字段。返回警告列表。"""
+    warns = []
+    for i, t in enumerate(trips, 1):
+        tc = (t.get('country') or '??').strip().upper()
+        entry = d(t.get('entry'))
+        exit_ = d(t.get('exit'))
+        if entry is None:
+            warns.append(f'⚠️ 行程#{i}({tc}) 缺入境日期——该段无法计入，请补齐')
+            continue
+        if exit_ is not None and exit_ < entry:
+            warns.append(f'⚠️ 行程#{i}({tc}) 离境日早于入境日（{exit_} < {entry}）——'
+                         f'日期倒置，该段未计入，请复核')
+        if entry > today:
+            warns.append(f'⚠️ 行程#{i}({tc}) 入境日 {entry} 在今天之后——未来行程应走'
+                         f'「未来入境预估」（as_of=计划入境日），已离境行程不应填未来日期')
+        if exit_ is not None and exit_ > today:
+            warns.append(f'⚠️ 行程#{i}({tc}) 离境日 {exit_} 在今天之后但未标在途——'
+                         f'请确认该行程是否已结束（在途应省略 exit）')
+    return warns
 
 
 def run(payload):
@@ -122,18 +175,25 @@ def run(payload):
     trips = payload.get('trips') or []
 
     # 签证来源与置信度
-    visa_source = payload.get('visa_source', 'dataset')  # dataset / user
+    # visa_source: dataset=快照值 / user=签证页单值 / user_rules=用户结构化整套 / web=联网检索
+    visa_source = payload.get('visa_source', 'dataset')
     visa_days = payload.get('visa_days')  # 用户签证页数字（覆盖 rules.stay_single）
     visa_type = payload.get('visa_type', '')  # 用户签证类型（用于置信度判断）
+    # rules 来源：结构化录入或联网检索时，调用方（模型）在此声明，输出如实透传
+    rules_source = payload.get('rules_source') or ('user_rules' if visa_source == 'user_rules'
+                                                    else ('web' if visa_source == 'web' else 'dataset'))
 
     # 用户签证页数字覆盖 dataset 值
     if visa_days and visa_days > 0:
         single = int(visa_days)
-        visa_source = 'user'
+        if visa_source != 'user_rules':
+            visa_source = 'user'
 
     # 置信度判定
-    if visa_source == 'user':
+    if visa_source in ('user', 'user_rules'):
         confidence = 'high'
+    elif visa_source == 'web':
+        confidence = 'medium'  # 联网检索到官方页面也不及用户签证页可靠，恒 medium
     elif visa_type and visa_type.strip():
         confidence = 'medium'
     elif payload.get('as_of') is not None:
@@ -162,11 +222,13 @@ def run(payload):
         'as_of': as_of.isoformat(),
         'rules_effective': {'stay_single': single, 'stay_window': window_n,
                             'stay_window_max': window_max,
-                            'calendar_year_window': cal_year},
+                            'calendar_year_window': cal_year,
+                            'source': rules_source},
         'visa_info': {
             'visa_type': visa_type or None,
             'visa_source': visa_source,
             'confidence': confidence,
+            'web_source': payload.get('web_source') or None,  # {name,url,date} 联网检索来源
         },
         'window': None,
         'single': None,
@@ -174,6 +236,10 @@ def run(payload):
         'status': 'unknown',
         'alerts': [],
     }
+
+    # 规则四元组合理性 + 行程日期防呆（结构化录入的机器校验层）
+    out['alerts'].extend(validate_rules(single, window_n, window_max, cal_year, rules_source))
+    out['alerts'].extend(validate_trips(trips, today))
 
     # 用户口述总天数交叉校验（实战教训：用户说 60 天、日期算出 82 天，必须指出差异）
     reported = payload.get('reported_days')
