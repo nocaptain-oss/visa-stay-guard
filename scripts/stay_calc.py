@@ -76,6 +76,16 @@ def pool_of(code):
     return None
 
 
+def same_pool(country, pool, tc):
+    """行程 tc 是否计入 country 的池：有池→池内成员；无池→仅该国自身（各国各自计数）。
+    空/缺失国家字段的行程一律不计（无归属数据不可信）。"""
+    if not tc:
+        return False
+    if pool:
+        return tc in POOLS[pool]['members']
+    return tc == country
+
+
 def occupied_days(trip, today):
     """一条行程占用的自然日集合（含入境当日；在途截至今天，离境日计入停留）。"""
     entry = d(trip['entry'])
@@ -136,8 +146,8 @@ def run(payload):
     current = None
     for t in trips:
         tc = (t.get('country') or '').strip().upper()
-        if pool and tc and tc not in POOLS[pool]['members']:
-            continue  # 非同池行程不计入
+        if not same_pool(country, pool, tc):
+            continue  # 非同池/无归属行程不计入（无池国家仅统计本国行程）
         all_days |= occupied_days(t, today)
         if tc == country and not t.get('exit'):
             current = t
@@ -220,7 +230,7 @@ def run(payload):
             tc = (t.get('country') or '').strip().upper()
             if tc == country and not t.get('exit'):
                 continue
-            if pool and tc and tc not in POOLS[pool]['members']:
+            if not same_pool(country, pool, tc):
                 continue
             others |= occupied_days(t, today)
         others_used = len(others & win)
@@ -282,8 +292,9 @@ def run(payload):
             out['bottom_line'] = (f'最晚离境日 {s["last_allowed_day"]}，'
                                   f'还能再待 {s["remaining_days"]} 天（不含今天）')
     elif s is not None:  # planning（未来入境预估）
+        capped = '（按入境日窗口余量封顶）' if window_max > 0 else ''
         out['bottom_line'] = (f'计划 {s["entry"]} 入境，本次最多可待 {s["effective_days"]} 天，'
-                              f'最晚 {s["last_allowed_day"]} 离境（按入境日窗口余量封顶）')
+                              f'最晚 {s["last_allowed_day"]} 离境{capped}')
     elif out['window'] is not None:
         w = out['window']
         scope = '本年度' if w['mode'] == 'calendar_year' else f'{w["window_days"]} 天窗口内'
