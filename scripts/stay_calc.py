@@ -34,10 +34,13 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
   "as_of": null,                         // 可选：评估日（未来入境场景传计划入境日），默认 today
   "visa_type": "旅游签",                 // 可选：用户签证类型（旅游/商务/探亲/留学/其他）
   "visa_source": "dataset",              // 可选：数据来源（dataset=dataset值 / user=用户签证页数字）
-  "visa_days": null                      // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
+  "visa_days": null,                     // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
+  "reported_days": null                  // 可选：用户口述的"已待总天数"（用于与行程日期交叉校验）
 }
 
-输出（stdout JSON）：含 `confidence` 字段，取值：
+输出（stdout JSON）：含 `bottom_line`（一句话结论，AI 必须直接引用此字段向用户播报，
+禁止自行从 effective_days/remaining_days 挑数字——两字段语义相近极易拿错）；
+含 `confidence` 字段，取值：
 - "high"：用户提供了签证页数字（visa_source="user"）
 - "medium"：用户确认签证类型与 dataset 匹配
 - "low"：用户说不清签证类型，用 dataset 值
@@ -157,9 +160,26 @@ def run(payload):
         },
         'window': None,
         'single': None,
+        'bottom_line': None,
         'status': 'unknown',
         'alerts': [],
     }
+
+    # 用户口述总天数交叉校验（实战教训：用户说 60 天、日期算出 82 天，必须指出差异）
+    reported = payload.get('reported_days')
+    if reported:
+        try:
+            reported = int(reported)
+        except (TypeError, ValueError):
+            reported = None
+    if reported and reported > 0:
+        actual = used if window_max > 0 else len(all_days)
+        if abs(actual - reported) >= 1:
+            scope = (f'{window_n} 天窗口内' if window_max > 0 and not cal_year
+                     else ('本年度' if cal_year else '全部行程'))
+            out['alerts'].append(
+                f'⚠️ 口径差异：您说自己待了 {reported} 天，但按行程日期（{scope}，含入境当日）'
+                f'算出 {actual} 天。数字对不上说明日期或记忆有误，请核对出入境日期后再下结论。')
 
     # ── 窗口尺 ──
     if window_max > 0:
@@ -250,6 +270,26 @@ def run(payload):
             'note': '未来入境预估（按入境日窗口余量封顶）',
         }
         out['status'] = 'planning'
+
+    # ── 一句话结论（AI 播报必须直接引用此字段；杜绝误把 effective_days 当剩余天数） ──
+    s = out['single']
+    if s is not None and out['status'] != 'planning':
+        if s['overdue']:
+            over = (today - d(s['last_allowed_day'])).days
+            out['bottom_line'] = (f'⚠️ 已超期 {over} 天（最晚离境日 {s["last_allowed_day"]}）'
+                                  f'——请立即离境或咨询移民律师')
+        else:
+            out['bottom_line'] = (f'最晚离境日 {s["last_allowed_day"]}，'
+                                  f'还能再待 {s["remaining_days"]} 天（不含今天）')
+    elif s is not None:  # planning（未来入境预估）
+        out['bottom_line'] = (f'计划 {s["entry"]} 入境，本次最多可待 {s["effective_days"]} 天，'
+                              f'最晚 {s["last_allowed_day"]} 离境（按入境日窗口余量封顶）')
+    elif out['window'] is not None:
+        w = out['window']
+        scope = '本年度' if w['mode'] == 'calendar_year' else f'{w["window_days"]} 天窗口内'
+        out['bottom_line'] = (f'当前不在 {country}：{scope}已用 {w["used"]} 天、剩余 {w["remaining"]} 天')
+    else:
+        out['bottom_line'] = '规则数据不含停留上限，无法计算——请提供签证页数字'
 
     if not out['alerts']:
         out['alerts'].append('✅ 状态正常')
