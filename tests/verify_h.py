@@ -181,6 +181,29 @@ check("H7.9 date_bias=future 时初五按未来推定（2026-11-13）",
 check("H7.10 未来推定进 bottom_line 计划入境日",
       r2.get("bottom_line", "").startswith("计划 2026-11-13 入境"), r2.get("bottom_line", "")[:30])
 
+print("== H8 「大年」口语 ==")
+check("H8.1 is_lunar 认「大年」", L.is_lunar("大年三十") and L.is_lunar("大年初五"))
+o, t, i = L.parse_lunar("2026年大年三十")
+check("H8.2 2026年大年三十 = 除夕 2027-02-05（腊月无三十回退廿九）",
+      o.isoformat() == "2027-02-05" and "廿九" in t and i is False, t)
+check("H8.3 2026年大年初一 = 2026 春节 2026-02-17",
+      L.parse_lunar("2026年大年初一")[0].isoformat() == "2026-02-17")
+check("H8.4 2026年大年二十三 = 小年 2027-01-30（同 H3.7 腊月廿三）",
+      L.parse_lunar("2026年大年二十三")[0].isoformat() == "2027-01-30")
+o4, t4, i4 = L.parse_lunar("大年三十", near=_date(2026, 10, 22))
+check("H8.5 缺年份大年三十 → 最近除夕 2027-02-05 + 代年须确认",
+      o4.isoformat() == "2027-02-05" and i4 is True, t4)
+o5, _, i5 = L.parse_lunar("大年初五", near=_date(2026, 10, 22))
+check("H8.6 缺年份大年初五 → 最近将来 2027-02-10 + 代年须确认",
+      o5.isoformat() == "2027-02-10" and i5 is True, str(o5))
+r8 = calc({"country": "TH", "today": "2026-10-22", "rules": th_rules,
+           "trips": [{"country": "TH", "entry": "2026年大年三十", "exit": None}]})
+a8 = " ".join(r8.get("alerts", []))
+check("H8.7 大年三十可进计算链且（含年份）不触发代年确认",
+      r8.get("status") != "error" and "确认" not in a8, a8[:40])
+check("H8.8 换算结果 2027-02-05 与显式公历一致",
+      r8.get("single", {}).get("entry") == "2027-02-05", str(r8.get("single", {}).get("entry")))
+
 print()
 print(f"结果: {len(fails)} 失败" + (f" -> {fails}" if fails else ""))
 sys.exit(1 if fails else 0)
