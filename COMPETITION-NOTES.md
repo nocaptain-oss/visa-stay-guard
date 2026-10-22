@@ -1648,3 +1648,38 @@ Skill 跑在用户那边，后台看不见。而对话模板的短板恰好藏�
   → 计划 2026-11-13 入境 + 未来推定 alert。
 - H5.3 断言按新行为重写（旧「初五必崩栈」已被推定+确认取代）；新增 H7 十条。
 - 全量 **2156 断言 + 13 场景回归 ALL GREEN**。
+
+## 二十一、反馈回路落地：agent.py 升级为匿名接收端（2026-10-22）
+
+### 部署链（华为云 120.46.177.9，已全链路验证）
+
+```
+模型 curl（用户同意后，≤5s）
+  → https://120.46.177.9/feedback?token=…（443，nginx location 反代）
+  → 127.0.0.1:8787（agent.py v2 HTTP 线程）
+  → JSONL 落盘 /var/lib/visaday-agent/feedback.jsonl
+  → 飞书实时推送（需用户先对 bot 发 /bind 绑定会话，一次长期有效）
+```
+
+- **复用现有资产**：visaday-agent.service（systemd，agent 用户，ProtectSystem=full +
+  新增 ReadWritePaths=/var/lib/visaday-agent）、飞书应用凭据（/etc/visaday-agent.env，
+  追加 FEEDBACK_TOKEN）、nginx 443。原文件备份 agent.py.bak-20261022。
+- **匿名 = 不收集**：只收 text（≤500 字）+ kind（gap/dispute）；IP 仅存 sha256 前 12 位
+  （限频用），无任何身份字段。
+- **限频**：每 IP 每分钟 3 条 / 每天 30 条（内存计），实测第 4 条 429 ✓；错 token 403 ✓；
+  公网 IP 直连不受备案拦截影响（域名仍 000，IP 200）。
+- **token 公开进 SKILL.md 是设计内**：仅防扫描，滥用上限=几条骚扰，服务端限频兜底。
+  token 本地留档 ~/visaday-archive/feedback-token.txt（不入 git）。
+- 域名备案通过后换域名只需改 SKILL.md 一行 + nginx server_name（IP 路径已通）。
+
+### SKILL.md 同步
+
+Gap 卡改双通道：先问「愿意匿名发给开发者吗」，答「好」→ POST（成功回「已匿名收到」，
+失败/429/无外网不重试退回评论区）；触发条件加第四种（复核后口径存疑 → kind=dispute）。
+反馈回路章节新增「二、匿名直发」整节。
+
+### 边界澄清（用户问询后确认）
+
+「五月十五」「五月二十」（有月份、无「初X」、无前缀）**仍按公历**——昨晚定的
+「漏了个号」规则未动；只有整串纯日名（初五/十五/廿三）才走农历/公历 30 天推定。
+已知文化歧义点：「八月十五」（中秋）现也按公历，翻不翻留给用户拍板。
