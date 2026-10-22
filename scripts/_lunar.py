@@ -149,26 +149,66 @@ _LUNAR_RE = re.compile(
 _YEAR_IN_TEXT = re.compile(r'(\d{4})\s*年?')
 
 
-def parse_lunar(text, default_year=None):
+def lunar_year_of(d_):
+    """公历日期属于哪个农历年：按当年春节划分，春节前属上一个农历年。"""
+    y = d_.year
+    if 1900 <= y <= 2100:
+        s = _NEW_YEAR[y - 1900]
+        if d_ < date(int(s[:4]), int(s[4:6]), int(s[6:])):
+            return y - 1
+    return y
+
+
+def nearest_occurrence(month, day, leap, near):
+    """缺年份时的消歧：在 near 所属农历年 ±1 里找该农历日，取离 near 最近的一次。
+
+    春节前说「腊月初五」指刚过去的那次（上一个公历年初）；说「正月初五」指
+    即将到来的那次（当年春节后）。公历年直代农历年在元旦～春节窗口会错一年。"""
+    best = None
+    base = lunar_year_of(near)
+    for y in (base - 1, base, base + 1):
+        out = lunar_to_solar(y, month, day, leap=leap)
+        if out is None:
+            continue
+        if best is None or abs((out - near).days) < abs((best[0] - near).days):
+            best = (out, y)
+    return best
+
+
+def parse_lunar(text, default_year=None, near=None):
     """从中文串里抽农历日期。
 
-    返回 (date, 说明) 或 (None, 原因)。只处理「有月份」的写法；
-    只说「初五」没有月份时返回 None，由调用方追问是哪个月。
-    """
+    返回 (date, 说明, 是否代过年)。只处理「有月份」的写法；
+    只说「初五」没有月份时返回 (None, 原因, False)，由调用方追问是哪个月。
+    缺年份：near（今天的公历日期）给了就取「离 near 最近的一次该农历日」，
+    否则退回 default_year / 系统当年（旧语义，兼容旧调用）。"""
     m = _LUNAR_RE.search(text)
     if not m:
-        return None, 'no_lunar_date'
+        return None, 'no_lunar_date', False
     leap, mo, dy = m.group(1), m.group(2), m.group(3)
     month, day = _num(mo), _num(dy)
     if not month or not day:
-        return None, 'bad_lunar_number'
+        return None, 'bad_lunar_number', False
+    inferred = False
     ym = _YEAR_IN_TEXT.search(text)   # 年份可能写在「农历」之前或之后，单独抓
-    year = int(ym.group(1)) if ym else (default_year or date.today().year)
+    if ym:
+        year = int(ym.group(1))
+    elif near is not None:
+        got = nearest_occurrence(month, day, bool(leap), near)
+        if got is None:
+            return None, 'lunar_out_of_range_or_missing', False
+        out, year = got
+        inferred = True
+        tag = '%d 年农历%s%s月%s' % (year, '闰' if leap else '',
+                                     _CN_MONTH[month], _CN_DAY[day])
+        return out, tag, inferred
+    else:
+        year = default_year or date.today().year
     out = lunar_to_solar(year, month, day, leap=bool(leap))
     if out is None:
-        return None, 'lunar_out_of_range_or_missing'
+        return None, 'lunar_out_of_range_or_missing', False
     tag = '%d 年农历%s%s月%s' % (year, '闰' if leap else '', _CN_MONTH[month], _CN_DAY[day])
-    return out, tag
+    return out, tag, inferred
 
 
 def is_lunar(text):

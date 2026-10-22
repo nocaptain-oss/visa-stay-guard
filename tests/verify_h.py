@@ -105,6 +105,38 @@ r3 = calc({**base, "country": "ES", "trips": [{"country": "ES", "entry": "初五
 check("H5.3 农历残缺输入返回可读 hint 而非崩栈",
       r3.get("status") == "error" and "月" in r3.get("hint", ""), r3.get("hint", "")[:30])
 
+print("== H6 缺年份代年：春节前腊月/冬月跨年 ==")
+from datetime import date as _date
+out, tag, inf = L.parse_lunar("腊月初五", near=_date(2027, 1, 15))
+check("H6.1 春节前(2027-01-15)腊月初五 → 刚过去那次 2027-01-12",
+      out.isoformat() == "2027-01-12" and inf is True, str(out))
+check("H6.2 归属农历年 2026（非公历直代）", tag == "2026 年农历腊月初五", tag)
+out2, tag2, inf2 = L.parse_lunar("腊月廿八", near=_date(2026, 1, 15))
+check("H6.3 春节前(2026-01-15)腊月廿八 → 将来那次 2026-02-15",
+      out2.isoformat() == "2026-02-15" and inf2 is True, str(out2))
+out3, _, inf3 = L.parse_lunar("腊月初五", near=_date(2026, 10, 22))
+check("H6.4 正常期(2026-10-22)腊月初五 → 2027-01-12",
+      out3.isoformat() == "2027-01-12" and inf3 is True, str(out3))
+out4, _, inf4 = L.parse_lunar("正月初五", near=_date(2027, 1, 15))
+check("H6.5 春节前正月初五 → 即将到来的 2027-02-10",
+      out4.isoformat() == "2027-02-10" and inf4 is True, str(out4))
+out5, _, inf5 = L.parse_lunar("2026年腊月初五")
+check("H6.6 显式年份不算代年", inf5 is False and out5.isoformat() == "2027-01-12")
+th_rules = {"stay_single": 30, "stay_window": 180, "stay_window_max": 90}
+r = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
+          "trips": [{"country": "TH", "entry": "腊月初五", "exit": None}]})
+alert_txt = " ".join(r.get("alerts", []))
+check("H6.7 缺年份代年触发「须确认」alert（含换算公历日）",
+      "确认" in alert_txt and "2027-01-12" in alert_txt, alert_txt[:60])
+r2 = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
+           "trips": [{"country": "TH", "entry": "2026年腊月初五", "exit": None}]})
+alert2 = " ".join(r2.get("alerts", []))
+check("H6.8 含年份不触发代年确认 alert", "代年" not in alert2, alert2[:40])
+r3b = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
+            "trips": [{"country": "TH", "entry": "2027-01-12", "exit": None}]})
+check("H6.9 代年换算与显式公历同日结果一致",
+      r.get("bottom_line") == r3b.get("bottom_line"), r.get("bottom_line", "")[:40])
+
 print()
 print(f"结果: {len(fails)} 失败" + (f" -> {fails}" if fails else ""))
 sys.exit(1 if fails else 0)
