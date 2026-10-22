@@ -59,7 +59,7 @@ import sys
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lunar import cn_num, is_lunar, parse_lunar  # noqa: E402  农历换算（纯查表，离线）
+from _lunar import cn_num, is_lunar, parse_lunar, parse_lunar_day, solar_to_lunar  # noqa: E402  农历换算（纯查表，离线）
 
 DANGER_DAYS = 3   # 剩余 ≤3 天 ⇒ danger（红）—— 全应用唯一来源，勿另写魔法数字
 NEAR_DAYS = 7     # 剩余 4~7 天 ⇒ near（橙）
@@ -91,10 +91,26 @@ def _cn_repl(m):
     return str(v) if v is not None else m.group()
 
 
-_INFERRED_LUNAR = {}   # 原文 → (公历日, 农历说明)：缺年份代年的换算，输出时必须经用户二次确认
+_INFERRED_DATES = {}   # 原文 → (公历日, 推定说明)：一切「缺月/缺年靠上下文推定」的日期，输出必须经用户二次确认
 
 
-def d(s, near=None):
+def _guess_day_only(n, near, bias, lunar):
+    """纯日号（无月无年）→ 30 天窗口内最近匹配日。past=从今天往回，future=从今天往前。
+
+    公历按 cand.day == n 匹配；农历按 solar_to_lunar(cand) 的农历日匹配。"""
+    step = 1 if bias == 'future' else -1
+    for k in range(0, 31):
+        cand = near + timedelta(days=step * k)
+        if lunar:
+            got = solar_to_lunar(cand)
+            if got and got[2] == n:
+                return cand
+        elif cand.day == n:
+            return cand
+    return None
+
+
+def d(s, near=None, bias='past'):
     """宽容的日期解析。
 
     公历：`2026-03-01` / `2026/3/1` / `2026.3.1` / `2026年3月1日` / `20260301`，
@@ -102,9 +118,12 @@ def d(s, near=None):
     农历：带「农历/阴历」前缀、含「闰X月」、或含「初X」的一律按农历换算——
     公历没有「初五」这种说法，看到就只可能指农历，不去猜。
     缺年份：near（今天）给了就取离 near 最近的一次该农历日（春节前说「腊月初五」
-    指刚过去/即将到来的那次，公历年直代会错一年），换算记入 _INFERRED_LUNAR，
+    指刚过去/即将到来的那次，公历年直代会错一年），换算记入 _INFERRED_DATES，
     输出必须先经用户确认，确认前不下最终结论。
-    缺年份的公历写法（`3月1日`）仍抛错，由 main 兜成 JSON。"""
+    缺月份的纯日号（`18号` 公历 / `初五` 农历）：near 给了就在 30 天窗口内按
+    bias 方向取最近匹配日（对话带「计划/打算」等未来语时调用方传 bias='future'），
+    同样记入 _INFERRED_DATES 须确认；near 没给则抛错。
+    缺年份且带月份的公历写法（`3月1日`）仍抛错，由 main 兜成 JSON。"""
     if not s:
         return None
     if isinstance(s, date):
@@ -113,15 +132,31 @@ def d(s, near=None):
     if is_lunar(t):
         out, why, inferred = parse_lunar(t, near=near)
         if out is None:
+            dn = parse_lunar_day(t)
+            if dn is not None and near is not None:
+                got = _guess_day_only(dn, near, bias, lunar=True)
+                if got is not None:
+                    _INFERRED_DATES[t] = (
+                        got, '「%s」缺月份，按农历%s 30 天内最近推定' % (t, '未来' if bias == 'future' else '过去'))
+                    return got
             raise InputError(
                 '农历日期「%s」换算不了（%s）' % (t, why),
                 '农历要写到月和日，如「农历八月十五」「五月初五」；只说「初五」定不了'
                 '是哪个月。也可以直接给公历日期。')
         if inferred:
-            _INFERRED_LUNAR[t] = (out, why)
+            _INFERRED_DATES[t] = (out, '%s，缺年份按最近出现代年' % why)
         return out
     t = _CN_DATE_RUN.sub(_cn_repl, t)      # 先归一汉字数字，再换分隔符
     t = t.replace('号', '日')
+    m_day = re.match(r'^(\d{1,2})[日]?$', t.strip())
+    if m_day and near is not None:
+        dn = int(m_day.group(1))
+        if 1 <= dn <= 31:
+            got = _guess_day_only(dn, near, bias, lunar=False)
+            if got is not None:
+                _INFERRED_DATES[str(s).strip()] = (
+                    got, '「%s」缺月份，按公历%s 30 天内最近推定' % (str(s).strip(), '未来' if bias == 'future' else '过去'))
+                return got
     for sep in ('年', '月', '日'):
         t = t.replace(sep, '-')
     t = t.replace('/', '-').replace('.', '-').rstrip('-')
@@ -155,12 +190,12 @@ def same_pool(country, pool, tc):
     return tc == country
 
 
-def occupied_days(trip, today):
+def occupied_days(trip, today, bias='past'):
     """一条行程占用的自然日集合（含入境当日；在途截至今天，离境日计入停留）。"""
-    entry = d(trip.get('entry'), near=today)
+    entry = d(trip.get('entry'), near=today, bias=bias)
     if entry is None:
         return set()
-    exit_ = d(trip.get('exit'), near=today)
+    exit_ = d(trip.get('exit'), near=today, bias=bias)
     end = exit_ if exit_ is not None else today
     if end < entry:
         return set()
@@ -210,7 +245,7 @@ def validate_rules(single, window_n, window_max, cal_year, source):
     return warns
 
 
-def validate_trips(trips, today, as_of=None):
+def validate_trips(trips, today, as_of=None, bias='past'):
     """行程日期防呆：倒置 / 未来日期 / 缺字段。返回警告列表。"""
     warns = []
     if as_of is not None and as_of < today:
@@ -218,8 +253,8 @@ def validate_trips(trips, today, as_of=None):
                      f'必须填计划入境日，不要把历史入境日填进 as_of；本次结果的时间基准可能错位')
     for i, t in enumerate(trips, 1):
         tc = (t.get('country') or '??').strip().upper()
-        entry = d(t.get('entry'), near=today)
-        exit_ = d(t.get('exit'), near=today)
+        entry = d(t.get('entry'), near=today, bias=bias)
+        exit_ = d(t.get('exit'), near=today, bias=bias)
         if entry is None:
             warns.append(f'⚠️ 行程#{i}({tc}) 缺入境日期——该段无法计入，请补齐')
             continue
@@ -244,7 +279,8 @@ def run(payload):
     cal_year = bool(rules.get('calendar_year_window'))
 
     today = d(payload.get('today')) or date.today()
-    as_of = d(payload.get('as_of'), near=today) or today
+    bias = payload.get('date_bias') or 'past'
+    as_of = d(payload.get('as_of'), near=today, bias=bias) or today
 
     pool = pool_of(country)
     trips = payload.get('trips') or []
@@ -289,7 +325,7 @@ def run(payload):
         tc = (t.get('country') or '').strip().upper()
         if not same_pool(country, pool, tc):
             continue  # 非同池/无归属行程不计入（无池国家仅统计本国行程）
-        all_days |= occupied_days(t, today)
+        all_days |= occupied_days(t, today, bias)
         if tc == country and not t.get('exit'):
             current = t
 
@@ -320,7 +356,7 @@ def run(payload):
 
     # 规则四元组合理性 + 行程日期防呆（结构化录入的机器校验层）
     out['alerts'].extend(validate_rules(single, window_n, window_max, cal_year, rules_source))
-    out['alerts'].extend(validate_trips(trips, today, as_of))
+    out['alerts'].extend(validate_trips(trips, today, as_of, bias))
 
     # 用户口述总天数交叉校验（实战教训：用户说 60 天、日期算出 82 天，必须指出差异）
     reported = payload.get('reported_days')
@@ -370,7 +406,7 @@ def run(payload):
 
     # ── 单次尺 ──
     if current is not None and single > 0:
-        entry = d(current['entry'], near=today)
+        entry = d(current['entry'], near=today, bias=bias)
         # 同池其它行程已用（剔除当前这条：按国家粒度剔除等价于按记录剔除）
         others = set()
         for t in trips:
@@ -379,7 +415,7 @@ def run(payload):
                 continue
             if not same_pool(country, pool, tc):
                 continue
-            others |= occupied_days(t, today)
+            others |= occupied_days(t, today, bias)
         others_used = len(others & win)
 
         if window_max > 0:
@@ -456,11 +492,11 @@ def run(payload):
     else:
         out['bottom_line'] = '规则数据不含停留上限，无法计算——请提供签证页数字'
 
-    # ── 农历缺年份代年：换算结果是推测，必须经用户二次确认（与口径差异同级，确认前不下结论） ──
-    for raw, (got, tag) in _INFERRED_LUNAR.items():
+    # ── 推定日期（缺月/缺年靠上下文）：结果是推测，必须经用户二次确认（与口径差异同级，确认前不下结论） ──
+    for raw, (got, note) in _INFERRED_DATES.items():
         out['alerts'].insert(
-            0, f'⚠️ 农历「{raw}」缺年份，已按最近出现换算为 {got.isoformat()}（{tag}）'
-               f'——这是代年推测，请先向用户确认这个公历日期，确认前不下最终结论')
+            0, f'⚠️ 日期「{raw}」不完整，已推定为 {got.isoformat()}（{note}）'
+               f'——请先向用户确认这个公历日期，确认前不下最终结论')
 
     if not out['alerts']:
         out['alerts'].append('✅ 状态正常')

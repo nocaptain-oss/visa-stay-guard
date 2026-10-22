@@ -102,8 +102,9 @@ r2 = calc({**base, "country": "ES",
 check("H5.2 农历入口与显式公历结果一致",
       r.get("bottom_line") == r2.get("bottom_line"), r.get("bottom_line", ""))
 r3 = calc({**base, "country": "ES", "trips": [{"country": "ES", "entry": "初五", "exit": None}]})
-check("H5.3 农历残缺输入返回可读 hint 而非崩栈",
-      r3.get("status") == "error" and "月" in r3.get("hint", ""), r3.get("hint", "")[:30])
+a3 = " ".join(r3.get("alerts", []))
+check("H5.3 只说初五 → 30 天窗口推定 + 须确认 alert（不再崩栈）",
+      r3.get("status") != "error" and "确认" in a3 and "缺月份" in a3, a3[:50])
 
 print("== H6 缺年份代年：春节前腊月/冬月跨年 ==")
 from datetime import date as _date
@@ -136,6 +137,39 @@ r3b = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
             "trips": [{"country": "TH", "entry": "2027-01-12", "exit": None}]})
 check("H6.9 代年换算与显式公历同日结果一致",
       r.get("bottom_line") == r3b.get("bottom_line"), r.get("bottom_line", "")[:40])
+
+print("== H7 纯日号：缺月份 30 天窗口推定 ==")
+import importlib
+import stay_calc as SC
+importlib.reload(SC)
+check("H7.1 反查：2026-10-22 = 农历九月十三",
+      L.solar_to_lunar(_date(2026, 10, 22)) == (2026, 9, 13, False))
+check("H7.2 纯农历日名解析", (L.parse_lunar_day("初五"), L.parse_lunar_day("十五"),
+      L.parse_lunar_day("廿三"), L.parse_lunar_day("初十"),
+      L.parse_lunar_day("五月十八")) == (5, 15, 23, 10, None))
+check("H7.3 18号 过去 → 2026-10-18",
+      SC.d("18号", near=_date(2026, 10, 22)).isoformat() == "2026-10-18")
+check("H7.4 十八号（汉字）→ 同 18号",
+      SC.d("十八号", near=_date(2026, 10, 22)).isoformat() == "2026-10-18")
+check("H7.5 18号 未来 → 2026-11-18",
+      SC.d("18号", near=_date(2026, 10, 22), bias="future").isoformat() == "2026-11-18")
+check("H7.6 初五 过去 → 2026-10-14（九月初五）",
+      SC.d("初五", near=_date(2026, 10, 22)).isoformat() == "2026-10-14")
+check("H7.7 初五 未来 → 2026-11-13（十月初五）",
+      SC.d("初五", near=_date(2026, 10, 22), bias="future").isoformat() == "2026-11-13")
+r = calc({"country": "TH", "today": "2026-10-22", "rules": th_rules,
+          "trips": [{"country": "TH", "entry": "十八号", "exit": None}]})
+a1 = " ".join(r.get("alerts", []))
+check("H7.8 缺月份推定触发「须确认」alert（含推定公历日）",
+      "确认" in a1 and "2026-10-18" in a1 and "缺月份" in a1, a1[:60])
+r2 = calc({"country": "JP", "today": "2026-10-22", "date_bias": "future",
+           "as_of": "初五", "rules": {"stay_single": 90, "stay_window": 0, "stay_window_max": 0},
+           "trips": []})
+a2 = " ".join(r2.get("alerts", []))
+check("H7.9 date_bias=future 时初五按未来推定（2026-11-13）",
+      "2026-11-13" in a2 and "未来" in a2, a2[:60])
+check("H7.10 未来推定进 bottom_line 计划入境日",
+      r2.get("bottom_line", "").startswith("计划 2026-11-13 入境"), r2.get("bottom_line", "")[:30])
 
 print()
 print(f"结果: {len(fails)} 失败" + (f" -> {fails}" if fails else ""))

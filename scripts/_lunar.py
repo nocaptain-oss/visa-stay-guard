@@ -213,3 +213,42 @@ def parse_lunar(text, default_year=None, near=None):
 
 def is_lunar(text):
     return bool(_LUNAR_HINT.search(text))
+
+
+def solar_to_lunar(d_):
+    """公历日 → (农历年, 月, 日, 是否闰月)。越界返回 None。
+
+    逐月消耗偏移：正常月之后紧跟闰同名月（若有）。"""
+    y = lunar_year_of(d_)
+    if not (1900 <= y <= 2100):
+        return None
+    s = _NEW_YEAR[y - 1900]
+    base = date(int(s[:4]), int(s[4:6]), int(s[6:]))
+    rem = (d_ - base).days
+    if rem < 0:
+        return None
+    code = _YEAR_CODE[y - 1900]
+    lm = code & 0xf
+    for m in range(1, 13):
+        for is_leap in ((False, True) if lm == m else (False,)):
+            length = 30 if ((_month_big(code, m) if not is_leap else (code >> 16) & 1)) else 29
+            if rem < length:
+                return y, m, rem + 1, is_leap
+            rem -= length
+    return None
+
+
+# 纯农历日名：整串只有 初X / 十五 / 廿三 / 三十（可带农历前缀与「日/号」尾）
+_DAY_NAME_RE = re.compile(
+    r'^(?:农历|陰曆|阴历|旧历|舊曆)?\s*(初?[零〇一二三四五六七八九十廿卅]+)\s*[日号]?$')
+
+
+def parse_lunar_day(text):
+    """纯农历日名 → 日序号（1-30）。「初五」5、「十五」15、「廿三」23、「三十」30。
+
+    只认「整串就是日名」的写法（有月份的走 parse_lunar）；认不出返回 None。"""
+    m = _DAY_NAME_RE.match(str(text).strip())
+    if not m:
+        return None
+    n = cn_num(m.group(1).lstrip('初'))
+    return n if n is not None and 1 <= n <= 30 else None
