@@ -204,6 +204,31 @@ check("H8.7 大年三十可进计算链且（含年份）不触发代年确认",
 check("H8.8 换算结果 2027-02-05 与显式公历一致",
       r8.get("single", {}).get("entry") == "2027-02-05", str(r8.get("single", {}).get("entry")))
 
+print("== H9 代年方向感知（date_bias）与确认一步到位 ==")
+o, t, i = L.parse_lunar("大年三十", near=_date(2026, 10, 22), bias="past")
+check("H9.1 大年三十 + past → 过去除夕 2026-02-16（去年大年三十）",
+      o.isoformat() == "2026-02-16" and i is True, t)
+o, _, _ = L.parse_lunar("大年三十", near=_date(2026, 10, 22), bias="future")
+check("H9.2 大年三十 + future → 2027-02-05（计划大年三十出发）", o.isoformat() == "2027-02-05")
+o, _, i = L.parse_lunar("大年三十", near=_date(2026, 10, 22))
+check("H9.3 大年三十 无 bias → nearest 2027-02-05（兼容 H8.5）",
+      o.isoformat() == "2027-02-05" and i is True, str(o))
+o, _, _ = L.parse_lunar("腊月初五", near=_date(2026, 10, 22), bias="past")
+check("H9.4 腊月初五 + past → 2026-01-23（农历2025年腊月初五）", o.isoformat() == "2026-01-23")
+rp = calc({"country": "TH", "today": "2026-10-22", "date_bias": "past", "rules": th_rules,
+           "trips": [{"country": "TH", "entry": "大年三十", "exit": None}]})
+ap = " ".join(rp.get("alerts", []))
+check("H9.5 全链路 past：推定 2026-02-16 且 alert 含公历日期（确认一步到位）",
+      rp.get("single", {}).get("entry") == "2026-02-16" and "2026-02-16" in ap and "确认" in ap,
+      ap[:70])
+rn = calc({"country": "TH", "today": "2026-10-22", "rules": th_rules,
+           "trips": [{"country": "TH", "entry": "大年三十", "exit": None}]})
+an = " ".join(rn.get("alerts", []))
+check("H9.6 无 bias：alert 念出 2027-02-05（公历日期在确认句内）",
+      "2027-02-05" in an and "确认" in an, an[:70])
+
+print()
+
 print()
 print(f"结果: {len(fails)} 失败" + (f" -> {fails}" if fails else ""))
 sys.exit(1 if fails else 0)

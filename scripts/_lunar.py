@@ -163,23 +163,28 @@ def lunar_year_of(d_):
     return y
 
 
-def nearest_occurrence(month, day, leap, near):
-    """缺年份时的消歧：在 near 所属农历年 ±1 里找该农历日，取离 near 最近的一次。
+def nearest_occurrence(month, day, leap, near, bias=None):
+    """缺年份时的消歧：在 near 所属农历年 ±1 里找该农历日。
 
-    春节前说「腊月初五」指刚过去的那次（上一个公历年初）；说「正月初五」指
-    即将到来的那次（当年春节后）。公历年直代农历年在元旦～春节窗口会错一年。"""
+    bias=None → 取离 near 最近的一次（春节前说腊月指即将到来、元旦后指刚过去，
+    nearest 恰好覆盖两个窗口）；'past' → 只取 ≤near 的最近一次（「去年大年三十」）；
+    'future' → 只取 ≥near 的最近一次（「计划大年三十出发」）。"""
     best = None
     base = lunar_year_of(near)
     for y in (base - 1, base, base + 1):
         out = lunar_to_solar(y, month, day, leap=leap)
         if out is None:
             continue
+        if bias == 'past' and out > near:
+            continue
+        if bias == 'future' and out < near:
+            continue
         if best is None or abs((out - near).days) < abs((best[0] - near).days):
             best = (out, y)
     return best
 
 
-def _resolve_danian(text, near, default_year):
+def _resolve_danian(text, near, default_year, bias=None):
     """「大年X」→ 正月（初X）或腊月（数字日），除夕小月自动回退廿九。
 
     「大年初一~初十」= 正月；「大年二十三~三十」= 腊月（小年/除夕语境）。
@@ -204,9 +209,9 @@ def _resolve_danian(text, near, default_year):
             return None, 'lunar_out_of_range_or_missing', False
         return out, '%d 年%s月%s%s' % (year, _CN_MONTH[month], _CN_DAY[day], note), False
     ref = near or date.today()
-    got = nearest_occurrence(month, day, False, ref)
+    got = nearest_occurrence(month, day, False, ref, bias)
     if got is None and month == 12 and day == 30:
-        got = nearest_occurrence(12, 29, False, ref)
+        got = nearest_occurrence(12, 29, False, ref, bias)
         day = 29
         note = '（除夕；腊月无三十）'
     if got is None:
@@ -215,15 +220,16 @@ def _resolve_danian(text, near, default_year):
     return out, '%d 年%s月%s%s' % (year, _CN_MONTH[month], _CN_DAY[day], note), True
 
 
-def parse_lunar(text, default_year=None, near=None):
+def parse_lunar(text, default_year=None, near=None, bias=None):
     """从中文串里抽农历日期。
 
     返回 (date, 说明, 是否代过年)。只处理「有月份」的写法；
     只说「初五」没有月份时返回 (None, 原因, False)，由调用方追问是哪个月。
-    缺年份：near（今天的公历日期）给了就取「离 near 最近的一次该农历日」，
-    否则退回 default_year / 系统当年（旧语义，兼容旧调用）。"""
+    缺年份：near（今天的公历日期）给了就取「离 near 最近的一次该农历日」
+    （bias='past'/'future' 时只朝该方向找），否则退回 default_year /
+    系统当年（旧语义，兼容旧调用）。"""
     if _DANIAN_RE.search(text):
-        return _resolve_danian(text, near, default_year)
+        return _resolve_danian(text, near, default_year, bias)
     m = _LUNAR_RE.search(text)
     if not m:
         return None, 'no_lunar_date', False
@@ -236,7 +242,7 @@ def parse_lunar(text, default_year=None, near=None):
     if ym:
         year = int(ym.group(1))
     elif near is not None:
-        got = nearest_occurrence(month, day, bool(leap), near)
+        got = nearest_occurrence(month, day, bool(leap), near, bias)
         if got is None:
             return None, 'lunar_out_of_range_or_missing', False
         out, year = got

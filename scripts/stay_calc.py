@@ -116,7 +116,7 @@ def _guess_day_only(n, near, bias, lunar):
     return None
 
 
-def d(s, near=None, bias='past'):
+def d(s, near=None, bias=None):
     """宽容的日期解析。
 
     公历：`2026-03-01` / `2026/3/1` / `2026.3.1` / `2026年3月1日` / `20260301`，
@@ -136,7 +136,7 @@ def d(s, near=None, bias='past'):
         return s
     t = str(s).strip()
     if is_lunar(t):
-        out, why, inferred = parse_lunar(t, near=near)
+        out, why, inferred = parse_lunar(t, near=near, bias=bias)
         if out is None:
             dn = parse_lunar_day(t)
             if dn is not None and near is not None:
@@ -203,7 +203,7 @@ def same_pool(country, pool, tc):
     return tc == country
 
 
-def occupied_days(trip, today, bias='past'):
+def occupied_days(trip, today, bias=None):
     """一条行程占用的自然日集合（含入境当日；在途截至今天，离境日计入停留）。"""
     entry = d(trip.get('entry'), near=today, bias=bias)
     if entry is None:
@@ -258,7 +258,7 @@ def validate_rules(single, window_n, window_max, cal_year, source):
     return warns
 
 
-def validate_trips(trips, today, as_of=None, bias='past'):
+def validate_trips(trips, today, as_of=None, bias=None):
     """行程日期防呆：倒置 / 未来日期 / 缺字段。返回警告列表。"""
     warns = []
     if as_of is not None and as_of < today:
@@ -292,7 +292,7 @@ def run(payload):
     cal_year = bool(rules.get('calendar_year_window'))
 
     today = d(payload.get('today')) or date.today()
-    bias = payload.get('date_bias') or 'past'
+    bias = payload.get('date_bias')
     as_of = d(payload.get('as_of'), near=today, bias=bias) or today
 
     pool = pool_of(country)
