@@ -511,6 +511,12 @@ def run(payload):
             0, f'⚠️ 日期「{raw}」不完整，已推定为 {got.isoformat()}（{note}）'
                f'——请先向用户确认这个公历日期，确认前不下最终结论')
 
+    # ── date_bias 非法值告警（防 typo 静默降级：'futrue'/数组/大小写都会被 == 比较无声吞掉） ──
+    if bias is not None and bias not in ('past', 'future'):
+        out['alerts'].insert(
+            0, f'⚠️ date_bias「{json.dumps(bias, ensure_ascii=False)}」不是 "past"/"future"，'
+               f'本次已按无方向处理（纯日号默认过去、农历代年取最近）——疑似拼写或格式错误，请核对重传')
+
     if not out['alerts']:
         out['alerts'].append('✅ 状态正常')
     return out

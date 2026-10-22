@@ -227,6 +227,29 @@ an = " ".join(rn.get("alerts", []))
 check("H9.6 无 bias：alert 念出 2027-02-05（公历日期在确认句内）",
       "2027-02-05" in an and "确认" in an, an[:70])
 
+print("== H9b 非法 date_bias 告警（防 typo 静默降级） ==")
+rt = calc({"country": "TH", "today": "2026-10-22", "date_bias": "futrue", "rules": th_rules,
+           "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
+at = " ".join(rt.get("alerts", []))
+check("H9.7 typo date_bias 触发告警且不崩",
+      rt.get("status") != "error" and "date_bias" in at and "futrue" in at, at[:60])
+ra = calc({"country": "TH", "today": "2026-10-22", "date_bias": ["past", "future"],
+           "rules": th_rules, "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
+check("H9.8 数组 date_bias 触发告警（混合方向无法单值表达）",
+      "date_bias" in " ".join(ra.get("alerts", [])), " ".join(ra.get("alerts", []))[:60])
+rok = calc({"country": "TH", "today": "2026-10-22", "date_bias": "past", "rules": th_rules,
+            "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
+check("H9.9 合法值 past 不误报告警",
+      "不是" not in " ".join(rok.get("alerts", [])), " ".join(rok.get("alerts", []))[:40])
+rmix = calc({"country": "DE", "today": "2026-10-22", "date_bias": "past",
+             "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+             "trips": [{"country": "FR", "entry": "2026-05-10", "exit": "2026-05-24"},
+                       {"country": "ES", "entry": "2026-09-08", "exit": "2026-09-27"}],
+             "as_of": "2026-11-20", "reported_days": 35})
+check("H9.10 混合时序单次调用：明确日期不受 date_bias 影响，as_of 锚窗口（5月滑出）",
+      rmix.get("window", {}).get("used") == 20 and rmix.get("status") == "planning",
+      str(rmix.get("window", {}).get("used")))
+
 print()
 
 print()
