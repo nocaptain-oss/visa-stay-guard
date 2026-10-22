@@ -1813,3 +1813,36 @@ ponytail 原则不写代码，一行文档约定。
 
 不会。畸形参数静默降级（现已加告警）→ 正确拆调语义精妙（as_of 锚窗口）→ 模型残缺
 日期追问不硬算。"拆两次调用"仅当**残缺日期+混合方向**才需要；日期补全后单次调用即可。
+
+## 二十七、上架前聚焦安全审查（2026-10-22，security-audit guidance mode）
+
+### 检测结果（量化）
+
+| 检测项 | 结果 |
+|---|---|
+| 密钥模式扫描（api_key/secret/password/AKIA/私钥块，含 tests） | 意外命中 **0**（唯一 apiKey 字样在 COMPETITION-NOTES 商业调研表格，不入包） |
+| 绝对路径/本机信息（/Users/nocaptain） | 命中 **0** |
+| 脚本危险模式（eval/exec/subprocess/os.system/urlopen/写文件） | 命中 **0**（4 脚本全为离线纯函数） |
+| 依赖审计 | 纯标准库（re/json/os/sys/hashlib/hmac/zlib/datetime/argparse），零外部依赖 ✓ |
+| _seal.py 加密实现 | 诚实边界声明（防盗门槛非密码学安全）✓ HMAC 防篡改 + 计数器密钥流 ✓ |
+| frontmatter | name 小写 kebab-case ✓ title 中文 ✓ description 含触发词 ✓ |
+| 全量回归 | 2175 断言 + 13 场景 ALL GREEN ✓ |
+| 包内敏感项 | 唯一一处：SKILL.md:438 反馈端点 IP+token——**设计内公开**（用户拍板仅防扫描，服务端限频 3/min/30/day 兜底，部署时全链路实测过） |
+
+### 发现并修复的唯一高危：提交包混入明文源
+
+`references/_src/` 的三份**明文 JSON 源**（397K：rules-data 185K + aggregated 180K +
+extended 32K）被 .gitignore 排除但**物理留在磁盘**——手工 `zip -r` 整目录提交必然把
+明文、COMPETITION-NOTES.md（107K，含服务器运维与商业策略）、tests/、.git 全打进包。
+**对照实验实测**：整目录打包混入禁项文件 29 个、248K；白名单打包 13 文件、116K。
+明文进包还会破坏 _seal 的设计目的（模型直接翻明文绕过 visa_lookup 查询入口）。
+
+修复：`package.sh` 白名单打包脚本——存在性校验 + 包内路径白名单正则 + 禁项零容忍
+（_src/tests/COMPETITION/.git/.DS_Store/嵌套zip）+ 文件数一致性，四重校验全过才产出
+`../visa-stay-guard-submit.zip`（13 文件/116K）。提交平台一律用此脚本，禁手工 zip。
+
+### 遗留待办（不变）
+
+- `title` 字段平台有效性待验证（若平台只读 name 当显示名则需改名）
+- 服务器侧（feedback 端点限频/8787 仅绑 127.0.0.1/nginx 反代/ssh 禁密码）部署时已实测，
+  本次未重复探测（skill 规定不探活部署端点）
