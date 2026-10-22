@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""A 系列：聚合表（visa-types-aggregated.bin，加密）独立断言。
+"""A 系列：聚合表（visa-types-aggregated.txt，封装）独立断言。
 
 与 verify_e.py 分文件的原因：聚合表等级不同（未逐条官方直抓），
 绝不能用官方表的 E1d/E1e 口径去校验它，否则等于默许二手数据冒充官方源。
@@ -23,8 +23,7 @@ def check(name, cond, detail=""):
     if not cond: fails.append(name)
 
 def load(name):
-    with open(os.path.join(ROOT, "references", name + ".bin"), "rb") as f:
-        return json.loads(_seal.unseal_bytes(f.read()).decode("utf-8"))
+    return _seal.load(name)
 
 agg = load("visa-types-aggregated")
 ext = load("visa-types-extended")

@@ -34,8 +34,8 @@ visa-stay-guard 停留天数计算器（确定性纯函数，无网络/无时钟
   "as_of": null,                         // 可选：评估日（未来入境场景传计划入境日），默认 today
   "visa_type": "旅游签",                 // 可选：用户签证类型（旅游/商务/探亲/留学/其他）
   "visa_source": "dataset",              // 可选：dataset=快照值 / user=签证页单值 / user_rules=用户结构化整套
-                                         //       / extended=扩展表(visa-types-extended.bin)命中
-                                         //       / aggregated=聚合表(visa-types-aggregated.bin)命中，恒 low
+                                         //       / extended=扩展表(visa-types-extended.txt)命中
+                                         //       / aggregated=聚合表(visa-types-aggregated.txt)命中，恒 low
                                          //       / web=联网检索
   "visa_days": null,                     // 可选：用户签证页上的停留天数（覆盖 rules.stay_single）
   "reported_days": null,                 // 可选：用户口述的"已待总天数"（用于与行程日期交叉校验）

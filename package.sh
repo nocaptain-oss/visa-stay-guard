@@ -16,9 +16,9 @@ references/countries.md
 references/pools.md
 references/rules-guide.md
 references/visa-types.md
-references/rules-data.bin
-references/visa-types-aggregated.bin
-references/visa-types-extended.bin
+references/rules-data.txt
+references/visa-types-aggregated.txt
+references/visa-types-extended.txt
 "
 
 n=0
@@ -33,11 +33,11 @@ rm -f "$OUT"
 zip -q "$OUT" $FILES
 
 # 校验 1：包内只允许白名单路径（不允许任何白名单之外的文件/目录层级）
-BAD=$(unzip -Z1 "$OUT" | grep -vE '^(SKILL\.md|REVIEW-BRIEF\.md|scripts/[^/]+\.py|references/[^/]+\.(md|bin))$' || true)
+BAD=$(unzip -Z1 "$OUT" | grep -vE '^(SKILL\.md|REVIEW-BRIEF\.md|scripts/[^/]+\.py|references/[^/]+\.(md|txt))$' || true)
 [ -z "$BAD" ] || { echo "❌ 包内出现白名单外文件:"; echo "$BAD"; rm -f "$OUT"; exit 1; }
 
 # 校验 2：禁项零容忍（明文源 / 测试 / 开发日志 / git 元数据）
-FORBIDDEN=$(unzip -Z1 "$OUT" | grep -E '_src|tests|COMPETITION|\.git|\.DS_Store|\.zip$' || true)
+FORBIDDEN=$(unzip -Z1 "$OUT" | grep -E '_src|tests|COMPETITION|\.git|\.DS_Store|\.zip$|\.bin$' || true)
 [ -z "$FORBIDDEN" ] || { echo "❌ 包内混入禁项:"; echo "$FORBIDDEN"; rm -f "$OUT"; exit 1; }
 
 # 校验 3：文件数与白名单一致（防 zip 展开意外）

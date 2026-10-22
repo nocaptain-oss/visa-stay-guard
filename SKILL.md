@@ -11,12 +11,12 @@ description: 算签证天数：录入出入境行程，计算"最晚离境日 / 
 
 ## 数据架构
 
-- **包内置数据快照**：`references/rules-data.bin` 收录 **213 国已核验规则**（加密存储，经 `scripts/visa_lookup.py` 读取）（x/N/y 天数、
+- **包内置数据快照**：`references/rules-data.txt` 收录 **213 国已核验规则**（base64 封装存储，经 `scripts/visa_lookup.py` 读取）（x/N/y 天数、
   入境方式、执法口径、超期处罚条款），**每条带官方来源链接**（sourceName/sourceUrl）与
   数据日期（updatedAt）——来源全部为 official/government 级。
 - 快照派生自 VisaDay AI 应用云管道核验数据（版本见 `_meta.snapshot_version`）。
-- **两级类型表**：`visa-types-extended.bin`（官方页面实抓核验，`tier=official`）与
-  `visa-types-aggregated.bin`（AI 聚合整理，`tier=aggregated`、`confidence=low`）。
+- **两级类型表**：`visa-types-extended.txt`（官方页面实抓核验，`tier=official`）与
+  `visa-types-aggregated.txt`（AI 聚合整理，`tier=aggregated`、`confidence=low`）。
   两者**分表分档**，查询时合并返回并逐条带 `tier`，播报口径不同（见分支 C-1 / C-1b）；
   聚合表的条目在官方核验通过后迁入官方表，不长期滞留。
 - **不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
@@ -238,8 +238,8 @@ python3 scripts/visa_lookup.py --rules KR
 
 返回该国 `staySingle/stayWindow/stayWindowMax/calendarYearWindow/entryKind/enforcement/visaName/
 penalty/sourceName/sourceUrl/updatedAt`。⚠️ 规则数据是**加密存储**的
-（`references/*.bin` 无法直读，这是作者的劳动成果保护），**只能通过本脚本查询**，
-不要尝试读取或解密 `.bin` 文件。
+（`references/*.txt` 是 base64 封装数据，直读是乱码——这是作者的劳动成果保护），**只能通过本脚本查询**，
+不要尝试解析或解密这些 `.txt` 数据文件（文件头注释也写了同样指引）。
 
 **`found: false` 不等于「该国没数据」**，按顺序排查：
 1. 国家名没识别 → 换 ISO 两位代码重试一次
@@ -490,11 +490,11 @@ curl -sk -m 5 "https://120.46.177.9/feedback?token=569b810aefebb4e0a23c7294fd084
 - `scripts/visa_lookup.py` — **数据查询入口**（模型查规则的唯一通道）
 - `scripts/_lunar.py` — 农历 ↔ 公历（1900-2100 查表，零依赖离线；数据取自 zhdate，MIT）
 - `scripts/_seal.py` — 数据资产封装（压缩 + 密钥流异或 + HMAC 校验；非密码学安全，仅供防盗用）
-- `references/rules-data.bin` — 213 国已核验规则数据（加密，经 visa_lookup 读取）
-- `references/visa-types-extended.bin` — 高频签证类型扩展表（加密，官方页面实抓核验，
+- `references/rules-data.txt` — 213 国已核验规则数据（base64 封装 + HMAC 校验，经 visa_lookup 读取）
+- `references/visa-types-extended.txt` — 高频签证类型扩展表（base64 封装，官方页面实抓核验，
   9 国 31 条：日本 3 类 / 澳大利亚 600 3 流 / 泰国 2 类 / 菲律宾 2 类 / 阿根廷 5 类 /
   马尔代夫 2 类 / 斯里兰卡 7 类 / 尼泊尔 3 类 / 韩国 4 类；分支 C-1 离线命中，避免联网延迟）
-- `references/visa-types-aggregated.bin` — 二级聚合表（加密，**未逐条官方核验**，
+- `references/visa-types-aggregated.txt` — 二级聚合表（base64 封装，**未逐条官方核验**，
   100 国 210 条（第一批 5 国 18 条 + 批量提炼 15 国 25 条 + 2026-10-21 两轮扩表，扩后按「与 dataset 去重、
   剔除表内自重复、剔除不适用中国普通护照」五轮收敛为 95 国 193 条）；
   全部 `confidence: low`，命中后按分支 C-1b 降级播报）

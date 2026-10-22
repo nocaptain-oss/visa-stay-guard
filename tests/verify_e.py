@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""E 系列：扩展表（visa-types-extended.bin，加密）结构与脚本消费验证
+"""E 系列：扩展表（visa-types-extended.txt，封装）结构与脚本消费验证
 
 覆盖：全表结构合法性（遍历所有国家/类型）+ JP/AU/TH 的脚本消费链路。
 
@@ -19,8 +19,7 @@ def check(name, cond, detail=""):
     if not cond: fails.append(name)
 
 # E1 全表结构合法（遍历）
-with open(os.path.join(ROOT, "references", "visa-types-extended.bin"), "rb") as _f:
-    ext = json.loads(_seal.unseal_bytes(_f.read()).decode("utf-8"))
+ext = _seal.load("visa-types-extended")
 check("E1a _meta 完备", all(k in ext["_meta"] for k in ("license", "updated_at", "confidence_model")))
 req = ("id", "type", "stay_single", "stay_window", "stay_window_max",
        "confidence", "source", "sourceUrl", "sourceTier", "verified_at")
