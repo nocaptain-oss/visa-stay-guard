@@ -77,9 +77,17 @@ check("H3.9 汉字数字：十五=15 廿三=23 三十=30",
 
 print("== H4 d() 入口 ==")
 check("H4.1 2026年农历八月十五 → 2026-09-25", d("2026年农历八月十五").isoformat() == "2026-09-25")
-check("H4.2 2026年八月十五 → 公历 8 月 15", d("2026年八月十五").isoformat() == "2026-08-15")
-check("H4.3 2026年五月十八 → 公历 5 月 18", d("2026年五月十八").isoformat() == "2026-05-18")
-check("H4.4 五月初五 → 农历", d("2026年五月初五").isoformat() == "2026-06-19")
+try:
+    d("2026年八月十五")
+    check("H4.2 无后缀汉字日 → 历法追问", False, "没有抛错")
+except InputError as e:
+    check("H4.2 无后缀汉字日 → 历法追问（hint 含公历农历）",
+          "公历" in (e.hint or "") and "农历" in (e.hint or ""), (e.hint or "")[:30])
+check("H4.2b 带号后缀按公历：2026年八月十五号 → 2026-08-15",
+      d("2026年八月十五号").isoformat() == "2026-08-15")
+check("H4.3 阿拉伯日无后缀仍公历：2026年5月18 → 2026-05-18",
+      d("2026年5月18").isoformat() == "2026-05-18")
+check("H4.4 2026年五月初五 → 农历", d("2026年五月初五").isoformat() == "2026-06-19")
 try:
     d("初五")
     check("H4.5 只说初五 → 拒绝并追问", False, "没有抛错")
@@ -87,9 +95,11 @@ except InputError as e:
     check("H4.5 只说初五 → 拒绝并追问", "月" in (e.hint or ""), (e.hint or "")[:24])
 try:
     d("五月十八")
-    check("H4.6 缺年份 → 拒绝并提示补年", False, "没有抛错")
+    check("H4.6 无后缀无年份 → 历法追问优先", False, "没有抛错")
 except InputError as e:
-    check("H4.6 缺年份 → 拒绝并提示补年", "年份" in (e.hint or ""), (e.hint or "")[:24])
+    check("H4.6 无后缀无年份 → 历法追问优先（且提醒公历需补年份）",
+          "公历" in (e.hint or "") and "农历" in (e.hint or "") and "年份" in (e.hint or ""),
+          (e.hint or "")[:30])
 
 print("== H5 整条计算链 ==")
 base = {"rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},

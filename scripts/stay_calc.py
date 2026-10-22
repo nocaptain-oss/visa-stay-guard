@@ -85,6 +85,12 @@ class InputError(Exception):
 
 _CN_DATE_RUN = re.compile(r'[零〇一二三四五六七八九十廿卅]{1,3}')
 
+# 汉字月日且日不带「号/日」后缀（可带四位年份）：「五月十八」「2026年八月十五」。
+# 「初X」与农历前缀已被 is_lunar 拦走，落到这里的都是无标记汉字日——历法不明。
+_AMBIG_CN_DAY = re.compile(
+    r'^(?:\d{4}\s*年)?\s*[零〇一二三四五六七八九十廿卅]{1,3}\s*月\s*'
+    r'[零〇一二三四五六七八九十廿卅]{1,3}\s*$')
+
 
 def _cn_repl(m):
     v = cn_num(m.group())
@@ -146,6 +152,13 @@ def d(s, near=None, bias='past'):
         if inferred:
             _INFERRED_DATES[t] = (out, '%s，缺年份按最近出现代年' % why)
         return out
+    # 「X月十几/二十几」：汉字月日、无「初X」无前缀、无「号/日」公历后缀——历法不明，先追问
+    if _AMBIG_CN_DAY.match(t):
+        raise InputError(
+            '日期「%s」历法不明（汉字日未带「号/日」公历后缀）' % t,
+            '「五月十八」这种写法公历农历都有可能——先问用户是公历还是农历，'
+            '按用户明确的口径重传：公历补全年份按 2026-05-18 传；农历传'
+            '「2026年农历五月十八」原文由脚本换算。')
     t = _CN_DATE_RUN.sub(_cn_repl, t)      # 先归一汉字数字，再换分隔符
     t = t.replace('号', '日')
     m_day = re.match(r'^(\d{1,2})[日]?$', t.strip())
