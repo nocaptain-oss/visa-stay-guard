@@ -1,7 +1,11 @@
 # visa-stay-guard · 算签证天数
 
+> 213 个国家和地区规则（官方来源可点验）· 申根 90/180 精确算法 · 2175 条断言全绿 · 离线零依赖
+
 离线算清「签证还能合法待几天」：报出入境行程，算出最晚离境日、90/180 滚动窗口
 剩余、额度哪天开始逐日恢复、超期后果（按各国处罚条款如实告知）。
+
+![demo](assets/demo.webp)
 
 装给 AI Agent 用（Claude Code / Codex CLI / 其他兼容 Agent Skills 的客户端），
 要求 agent 有本地脚本执行能力（一条 `python3`）。零依赖（纯 Python 标准库）、
@@ -23,6 +27,13 @@
 
 边界如实说：内置的是数据快照不是实时——某国昨天刚改政策它不知道，靠每条
 数据自带日期与官方链接供你二次核对。不构成法律建议。
+
+## TL;DR (English)
+
+Offline Schengen 90/180 calculator as an Agent Skill (Claude Code / Codex CLI).
+213 countries' stay rules with official sources, exact rolling-window math
+(35-country shared quota, day-by-day recovery), Chinese colloquial dates
+(lunar calendar included). Zero deps, pure Python stdlib, deterministic.
 
 ## 安装（装什么 · 装到哪 · 装完跑什么）
 
@@ -69,6 +80,11 @@ EOF
 
 日常不用敲命令——对 agent 说「我申根还能待几天」「落地签能待多久」即触发
 （触发词表见 SKILL.md frontmatter）。
+
+## 作者的其他工具
+
+- [css-canvas-inspector](https://github.com/nocaptain-oss/css-canvas-inspector) —
+  固定尺寸 HTML 画布的可视化 CSS 检查器，人与 Agent 协作调样式
 
 ## 深读
 
