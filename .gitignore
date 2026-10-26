@@ -1,3 +1,29 @@
 
+# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Local secrets and packaged output
+.env
+.env.*
+!.env.example
+*.zip
+
 # 数据资产明文源（只在本机维护，入库的是加密后的 references/*.bin）
 references/_src/
