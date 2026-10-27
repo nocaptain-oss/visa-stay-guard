@@ -5,11 +5,13 @@
 用法: python3 tests/verify_c.py [被测脚本路径]
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "scripts", "stay_calc.py")
 
 def run(p):
+    p = with_supported_profile(p)
     r = subprocess.run(["python3", SCRIPT], input=json.dumps(p), capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:300]
     return json.loads(r.stdout)
@@ -28,9 +30,10 @@ def check(name, cond, detail=""):
 o = run({"country": "TH", "today": "2026-10-21",
          "rules": {"stay_single": 30, "stay_window": 180, "stay_window_max": 90},
          "trips": TH_TRIPS, "reported_days": 21})
-check("C1a TH 窗口 used=17(剔 GB)", o["window"]["used"] == 17, f"got={o['window']['used']}")
+candidate = o.get("candidate") or {}
+check("C1a TH 窗口 used=17(剔 GB)", candidate["window"]["used"] == 17, f"got={candidate['window']['used']}")
 check("C1b 口径差异 21 vs 17 触发", any("口径差异" in a for a in o["alerts"]))
-check("C1c single eff=30 不受 GB 污染", o["single"]["effective_days"] == 30, f"got={o['single']['effective_days']}")
+check("C1c single eff=30 不受 GB 污染", candidate["single"]["effective_days"] == 30, f"got={candidate['single']['effective_days']}")
 
 # C1 换威胁场景：池外大额行程不挤占本国额度
 o = run({"country": "TH", "today": "2026-10-21",
@@ -48,7 +51,7 @@ check("C2 JP planning 无'封顶'注", "封顶" not in o["bottom_line"], f"bl={o
 o = run({"country": "ES", "today": "2026-10-21", "as_of": "2026-12-17",
          "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
          "trips": [{"country": "FR", "entry": "2026-08-01", "exit": "2026-09-10"},
-                    {"country": "ES", "entry": "2026-09-16", "exit": "2026-10-22"}]})
+                    {"country": "ES", "entry": "2026-09-16", "exit": "2026-10-20"}]})
 check("C2b ES planning 保留'封顶'注", "封顶" in o["bottom_line"], f"bl={o['bottom_line']!r}")
 
 # 申根池过滤不回归：GB 混进 ES 计算仍被剔

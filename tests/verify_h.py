@@ -14,6 +14,7 @@
 用法: python3 tests/verify_h.py
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -31,6 +32,7 @@ def check(name, cond, detail=""):
 
 
 def calc(payload):
+    payload = with_supported_profile(payload)
     r = subprocess.run(["python3", CALC], input=json.dumps(payload),
                        capture_output=True, text=True)
     return json.loads(r.stdout)
@@ -114,7 +116,8 @@ check("H5.2 农历入口与显式公历结果一致",
 r3 = calc({**base, "country": "ES", "trips": [{"country": "ES", "entry": "初五", "exit": None}]})
 a3 = " ".join(r3.get("alerts", []))
 check("H5.3 只说初五 → 30 天窗口推定 + 须确认 alert（不再崩栈）",
-      r3.get("status") != "error" and "确认" in a3 and "缺月份" in a3, a3[:50])
+      r3.get("status") == "needs_confirmation" and r3.get("bottom_line") is None
+      and "确认" in a3 and "缺月份" in a3, a3[:50])
 
 print("== H6 缺年份代年：春节前腊月/冬月跨年 ==")
 from datetime import date as _date
@@ -138,7 +141,8 @@ r = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
           "trips": [{"country": "TH", "entry": "腊月初五", "exit": None}]})
 alert_txt = " ".join(r.get("alerts", []))
 check("H6.7 缺年份代年触发「须确认」alert（含换算公历日）",
-      "确认" in alert_txt and "2027-01-12" in alert_txt, alert_txt[:60])
+      r.get("status") == "needs_confirmation" and r.get("bottom_line") is None
+      and "确认" in alert_txt and "2027-01-12" in alert_txt, alert_txt[:60])
 r2 = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
            "trips": [{"country": "TH", "entry": "2026年腊月初五", "exit": None}]})
 alert2 = " ".join(r2.get("alerts", []))
@@ -146,7 +150,8 @@ check("H6.8 含年份不触发代年确认 alert", "代年" not in alert2, alert
 r3b = calc({"country": "TH", "today": "2027-01-15", "rules": th_rules,
             "trips": [{"country": "TH", "entry": "2027-01-12", "exit": None}]})
 check("H6.9 代年换算与显式公历同日结果一致",
-      r.get("bottom_line") == r3b.get("bottom_line"), r.get("bottom_line", "")[:40])
+      (r.get("candidate") or {}).get("bottom_line") == r3b.get("bottom_line"),
+      str((r.get("candidate") or {}).get("bottom_line")))
 
 print("== H7 纯日号：缺月份 30 天窗口推定 ==")
 import importlib
@@ -171,15 +176,18 @@ r = calc({"country": "TH", "today": "2026-10-22", "rules": th_rules,
           "trips": [{"country": "TH", "entry": "十八号", "exit": None}]})
 a1 = " ".join(r.get("alerts", []))
 check("H7.8 缺月份推定触发「须确认」alert（含推定公历日）",
-      "确认" in a1 and "2026-10-18" in a1 and "缺月份" in a1, a1[:60])
+      r.get("status") == "needs_confirmation" and r.get("bottom_line") is None
+      and "确认" in a1 and "2026-10-18" in a1 and "缺月份" in a1, a1[:60])
 r2 = calc({"country": "JP", "today": "2026-10-22", "date_bias": "future",
            "as_of": "初五", "rules": {"stay_single": 90, "stay_window": 0, "stay_window_max": 0},
            "trips": []})
 a2 = " ".join(r2.get("alerts", []))
 check("H7.9 date_bias=future 时初五按未来推定（2026-11-13）",
       "2026-11-13" in a2 and "未来" in a2, a2[:60])
-check("H7.10 未来推定进 bottom_line 计划入境日",
-      r2.get("bottom_line", "").startswith("计划 2026-11-13 入境"), r2.get("bottom_line", "")[:30])
+check("H7.10 未来推定只进候选结论，必须确认",
+      r2.get("status") == "needs_confirmation" and r2.get("bottom_line") is None
+      and ((r2.get("candidate") or {}).get("bottom_line") or "").startswith("计划 2026-11-13 入境"),
+      str((r2.get("candidate") or {}).get("bottom_line")))
 
 print("== H8 「大年」口语 ==")
 check("H8.1 is_lunar 认「大年」", L.is_lunar("大年三十") and L.is_lunar("大年初五"))
@@ -219,24 +227,29 @@ rp = calc({"country": "TH", "today": "2026-10-22", "date_bias": "past", "rules":
            "trips": [{"country": "TH", "entry": "大年三十", "exit": None}]})
 ap = " ".join(rp.get("alerts", []))
 check("H9.5 全链路 past：推定 2026-02-16 且 alert 含公历日期（确认一步到位）",
-      rp.get("single", {}).get("entry") == "2026-02-16" and "2026-02-16" in ap and "确认" in ap,
+      rp.get("status") == "needs_confirmation" and rp.get("bottom_line") is None
+      and ((rp.get("candidate") or {}).get("single") or {}).get("entry") == "2026-02-16"
+      and "2026-02-16" in ap and "确认" in ap,
       ap[:70])
 rn = calc({"country": "TH", "today": "2026-10-22", "rules": th_rules,
            "trips": [{"country": "TH", "entry": "大年三十", "exit": None}]})
 an = " ".join(rn.get("alerts", []))
 check("H9.6 无 bias：alert 念出 2027-02-05（公历日期在确认句内）",
-      "2027-02-05" in an and "确认" in an, an[:70])
+      rn.get("status") == "needs_confirmation" and rn.get("bottom_line") is None
+      and "2027-02-05" in an and "确认" in an, an[:70])
 
 print("== H9b 非法 date_bias 告警（防 typo 静默降级） ==")
 rt = calc({"country": "TH", "today": "2026-10-22", "date_bias": "futrue", "rules": th_rules,
            "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
 at = " ".join(rt.get("alerts", []))
 check("H9.7 typo date_bias 触发告警且不崩",
-      rt.get("status") != "error" and "date_bias" in at and "futrue" in at, at[:60])
+      rt.get("status") == "needs_confirmation" and rt.get("bottom_line") is None
+      and "date_bias" in at and "futrue" in at, at[:60])
 ra = calc({"country": "TH", "today": "2026-10-22", "date_bias": ["past", "future"],
            "rules": th_rules, "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
 check("H9.8 数组 date_bias 触发告警（混合方向无法单值表达）",
-      "date_bias" in " ".join(ra.get("alerts", [])), " ".join(ra.get("alerts", []))[:60])
+      ra.get("status") == "needs_confirmation" and ra.get("bottom_line") is None
+      and "date_bias" in " ".join(ra.get("alerts", [])), " ".join(ra.get("alerts", []))[:60])
 rok = calc({"country": "TH", "today": "2026-10-22", "date_bias": "past", "rules": th_rules,
             "trips": [{"country": "TH", "entry": "18号", "exit": None}]})
 check("H9.9 合法值 past 不误报告警",
@@ -247,8 +260,9 @@ rmix = calc({"country": "DE", "today": "2026-10-22", "date_bias": "past",
                        {"country": "ES", "entry": "2026-09-08", "exit": "2026-09-27"}],
              "as_of": "2026-11-20", "reported_days": 35})
 check("H9.10 混合时序单次调用：明确日期不受 date_bias 影响，as_of 锚窗口（5月滑出）",
-      rmix.get("window", {}).get("used") == 20 and rmix.get("status") == "planning",
-      str(rmix.get("window", {}).get("used")))
+      ((rmix.get("candidate") or {}).get("window") or {}).get("used") == 20
+      and rmix.get("status") == "needs_confirmation" and rmix.get("bottom_line") is None,
+      str((rmix.get("candidate") or {}).get("window")))
 
 print()
 

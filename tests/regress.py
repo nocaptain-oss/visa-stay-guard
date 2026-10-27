@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 """13 场景回归：tests/fixtures/ 下 t1-t12 + th.json 全量跑通
 
-不变量：bottom_line 里的“再待 N 天”必须与 single.remaining_days 一致（非 planning、非逾期）。
+不变量：可播报状态下，bottom_line 的“再待 N 天”必须与 single.remaining_days 一致；
+needs_confirmation / blocked 必须没有 bottom_line。
 
 用法: python3 tests/regress.py [被测脚本路径]
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "scripts", "stay_calc.py")
@@ -17,7 +19,13 @@ files.append(os.path.join(FIXTURES, "th.json"))
 
 fails = []
 for f in files:
-    r = subprocess.run(["python3", SCRIPT, f], capture_output=True, text=True)
+    payload = with_supported_profile(json.load(open(f, encoding="utf-8")))
+    r = subprocess.run(
+        ["python3", SCRIPT],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
     if r.returncode != 0:
         fails.append((f, f"exit {r.returncode}: {r.stderr[:200]}"))
         print(f"FAIL {os.path.basename(f):8s} exit {r.returncode}")

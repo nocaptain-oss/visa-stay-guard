@@ -7,6 +7,7 @@
 用法: python3 tests/verify_e.py [被测脚本路径]
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "scripts", "stay_calc.py")
@@ -42,6 +43,7 @@ def rule(t):
             "stay_window_max": t["stay_window_max"]}
 
 def run(p):
+    p = with_supported_profile(p)
     r = subprocess.run(["python3", SCRIPT], input=json.dumps(p), capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:300]
     return json.loads(r.stdout)

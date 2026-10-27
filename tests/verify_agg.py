@@ -9,6 +9,7 @@
 用法: python3 tests/verify_agg.py
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -88,6 +89,7 @@ check("A5f --search 覆盖聚合表", any(h["tier"] == "aggregated" for h in o.g
 biz = next(t for t in agg["countries"]["MM"]["types"] if t["id"] == "mm-business")
 voa = next(t for t in agg["countries"]["MM"]["types"] if t["id"] == "mm-tourist-voa")
 def run(p):
+    p = with_supported_profile(p)
     r = subprocess.run(["python3", CALC], input=json.dumps(p), capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:300]
     return json.loads(r.stdout)

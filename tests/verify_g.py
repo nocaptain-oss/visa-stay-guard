@@ -11,6 +11,7 @@
 用法: python3 tests/verify_g.py
 """
 import json, os, subprocess, sys
+from _support import with_supported_profile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CALC = os.path.join(ROOT, "scripts", "stay_calc.py")
@@ -23,6 +24,7 @@ def check(name, cond, detail=""):
 
 
 def calc(payload):
+    payload = with_supported_profile(payload)
     r = subprocess.run(["python3", CALC], input=json.dumps(payload),
                        capture_output=True, text=True)
     return json.loads(r.stdout)   # 崩溃会在这里抛，等价于测试失败
@@ -54,8 +56,9 @@ print("== G3 as_of 早于 today 必须告警 ==")
 o = calc({**JP, "today": "2026-10-21", "as_of": "2026-10-01", "trips": []})
 check("G3 有「时间基准错位」告警",
       any("as_of" in a and "早于" in a for a in o.get("alerts", [])), f"alerts={o.get('alerts')}")
-check("G3 bottom_line 不称「今天」", "若 2026-10-01 入境" in (o.get("bottom_line") or ""),
-      f"got={o.get('bottom_line')!r}")
+check("G3 时间基准错位必须待确认",
+      o.get("status") == "needs_confirmation" and o.get("bottom_line") is None,
+      f"status={o.get('status')} bottom_line={o.get('bottom_line')!r}")
 
 print("== G4 自然年模式漏填年度上限必须告警 ==")
 o = calc({"country": "IN", "today": "2026-10-21",
@@ -64,6 +67,8 @@ o = calc({"country": "IN", "today": "2026-10-21",
           "trips": [{"country": "IN", "entry": "2026-09-01", "exit": None}]})
 check("G4 报「年度额度限制不生效」",
       any("年度额度限制不生效" in a for a in o.get("alerts", [])), f"alerts={o.get('alerts')}")
+check("G4b 规则疑点不得直接播报",
+      o.get("status") == "needs_confirmation" and o.get("bottom_line") is None)
 
 print("== G5 自然年 + stay_window=365 是等价写法，不该报疑点 ==")
 o = calc({"country": "IN", "today": "2026-10-21", "visa_source": "aggregated",

@@ -17,6 +17,7 @@
 python3 scripts/stay_calc.py
 {
   "country": "ES", "today": "2026-10-21",
+  "passport_nationality": "CN", "passport_type": "ordinary", "residence_status": "visitor",
   "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
   "trips": [
     {"country": "FR", "entry": "2026-06-01", "exit": "2026-07-10"},
@@ -29,14 +30,17 @@ python3 scripts/stay_calc.py
 脚本返回：
 
 ```
-bottom_line: ⚠️ 已超期 1 天（最晚离境日 2026-10-20）——请立即离境或咨询移民律师
-window:     used 91 / cap 90，refresh_date 2026-11-28
+status:     needs_confirmation
+bottom_line: null
+candidate.window: used 91 / cap 90，refresh_date 2026-11-28（仅供核对）
 alerts:
   ⚠️ 口径差异：您说自己待了 60 天，但按行程日期算出 91 天。
      数字对不上说明日期或记忆有误，请核对出入境日期后再下结论。
 ```
 
-这里有两件事同时发生。第一，超期了。第二，用户自己记的数（60）和日期算出来的数（91）差了 31 天，脚本把差异顶回给用户核对，而不是默认相信任何一边。
+这里有两件事同时发生。第一，候选计算显示超期。第二，用户自己记的数（60）和日期
+算出来的数（91）差了 31 天。脚本把状态设为 `needs_confirmation`，不下最终结论；
+它先把差异顶回给用户核对，而不是默认相信任何一边。
 
 多数工具到这里就结束了，给一个数字。这个会先把「你和我算的不一样」摆出来。
 
@@ -99,6 +103,9 @@ conflict_note: 与主表口径冲突：主表记 30 天，本条目记 21 天。
 
 **用户口述和算出来的数对不上。** 前面那个 60 天 vs 91 天的例子。要求先核对再下结论。
 
+**护照国籍、护照类型或居留身份不适用。** 内置规则只自动适用于中国普通护照的短期访客。
+学生居留、工作居留、其他护照，或只是“看起来说中文”的用户，都不会被套用旅游签模板。
+
 ---
 
 ## 数据从哪来
@@ -120,7 +127,10 @@ conflict_note: 与主表口径冲突：主表记 30 天，本条目记 21 天。
 - 天数含入境当日。9 月 1 日入境、9 月 20 日离境算 20 天。
 - 滚动窗口 `[今天-(N-1), 今天]`，按目的地时区的日历日，共 N 天。
 - 同池国家共享额度。申根 35 国一个池（180/90）；美国、英国也各自成池，天数合并统计，但额度数字不内置，需要用户提供。
-- 本次有效上限 = min(单次上限, 窗口上限 − 同池其它行程已用)。
+- 当前/未来停留逐日模拟，每天同时检查单次上限与滚动窗口占用；停留期间释放的额度会
+  逐日计入，不再用入境当天的静态余量封死整个停留。
+- 相邻/重叠的同池行程合并为一次连续停留；跳国不重置单次起点。
+- 窗口余量为 0 时返回 `blocked` 和 0 天，不再抬成“还能待 1 天”。
 - 额度释放是逐日 +1，不是到期一次性到账。展示成一次性到账会让人多待几天。
 - 风险分档：剩余 ≤3 天红，4–7 天橙。
 
@@ -154,7 +164,7 @@ Skill 跑在平台沙箱里，作者看不到用户问了什么、卡在哪。�
 
 ## 验证
 
-`sh tests/run-all.sh` 跑 7 个断言文件加 13 个场景回归，共 2175 条断言。
+`sh tests/run-all.sh` 跑 8 个断言文件加 13 个场景回归，共 2233 条断言。
 
 断言针对具体的坑，每条都对应一次踩过的错误：
 
@@ -187,16 +197,19 @@ python3 scripts/visa_lookup.py --rules ES
 python3 scripts/visa_lookup.py --types 日本
 python3 scripts/visa_lookup.py --search 五年多次
 
-# 算天数
+# 算天数（today 与身份字段必填）
 python3 scripts/stay_calc.py <<'EOF'
 {"country":"ES","today":"2026-10-21",
+ "passport_nationality":"CN","passport_type":"ordinary","residence_status":"visitor",
  "rules":{"stay_single":90,"stay_window":180,"stay_window_max":90},
  "trips":[{"country":"FR","entry":"2026-06-01","exit":"2026-07-10"},
           {"country":"ES","entry":"2026-09-01","exit":null}]}
 EOF
 ```
 
-脚本输出 `bottom_line` 字段，那是一句话结论，模型必须原样引用它来播报。这个设计来自一次事故：模型从输出里翻出 `effective_days`（本次入境的总额度）当成剩余天数说给用户，报「还能再待 49 天」，实际只剩 8 天。字段名离得太近，光靠提示词约束不住，所以把播报出口收敛到一个字段。
+脚本输出 `bottom_line` 字段，那是一句话结论，模型必须原样引用它来播报。
+`status=needs_confirmation/blocked` 时该字段为 `null`，模型只能追问或说明阻断，
+不得从 `candidate`、`effective_days` 或窗口用量自行拼数字。
 
 ---
 
