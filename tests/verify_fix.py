@@ -77,5 +77,42 @@ o = run({
 })
 check("T6 planning bottom_line 非空", bool(o.get("bottom_line")), f"got={o.get('bottom_line')!r}")
 
+# T7 单次上限 ≠ 窗口上限：同池跨境连续停留必须按池合并、受单次上限约束
+# （对抗报告 M-2 点名的唯一「建模错误→数值错误」路径）
+o = run({
+  "country": "FR", "today": "2026-10-21",
+  "rules": {"stay_single": 30, "stay_window": 180, "stay_window_max": 90},
+  "trips": [
+    {"country": "ES", "entry": "2026-09-01", "exit": "2026-09-20"},
+    {"country": "FR", "entry": "2026-09-21", "exit": None}
+  ]
+})
+s7 = o.get("single") or {}
+check("T7a 连续停留从池内首日起算", s7.get("entry") == "2026-09-01", f"got={s7.get('entry')}")
+check("T7b 单次上限 30 生效（非窗口 90）", s7.get("effective_days") == 30, f"got={s7.get('effective_days')}")
+check("T7c 超单次上限→overdue 且最晚 09-30",
+      o.get("status") == "overdue" and s7.get("last_allowed_day") == "2026-09-30",
+      f"status={o.get('status')} last={s7.get('last_allowed_day')}")
+
+# T8 confirmed 放行软性疑点（口径差异）
+o = run({**BASE, "reported_days": 60, "confirmed": True})
+check("T8a confirmed 放行口径差异", o.get("status") != "needs_confirmation" and bool(o.get("bottom_line")),
+      f"status={o.get('status')} bl={o.get('bottom_line')!r}")
+check("T8b 放行后仍保留差异 alert", any("口径差异" in a for a in o.get("alerts", [])))
+
+# T9 confirmed 不放行硬冲突（as_of 与在途行程冲突：必须改输入）
+o = run({
+  "country": "ES", "today": "2026-10-21", "as_of": "2026-12-01", "confirmed": True,
+  "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+  "trips": [{"country": "ES", "entry": "2026-09-20", "exit": None}]
+})
+check("T9 as_of 冲突不被 confirmed 放行",
+      o.get("status") == "needs_confirmation" and o.get("bottom_line") is None,
+      f"status={o.get('status')}")
+
+# T10 confirmed 类型严格（吸取 P1-1 字符串 bool 教训）
+o = run({**BASE, "reported_days": 60, "confirmed": "true"})
+check("T10 字符串 confirmed 返回结构化错误", o.get("status") == "error" and o.get("hint"), f"status={o.get('status')}")
+
 print(f"\n结果: {len(fails)} 失败")
 sys.exit(1 if fails else 0)

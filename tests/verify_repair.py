@@ -56,6 +56,8 @@ supported = {
     "passport_nationality": "CN",
     "passport_type": "ordinary",
     "residence_status": "visitor",
+    "visa_class": "short_stay",
+    "entry_basis": "visa_free",
 }
 
 missing_today = dict(supported)

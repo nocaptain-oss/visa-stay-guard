@@ -1,13 +1,74 @@
 ---
-name: visa-stay-guard
-title: 算签证天数
-description: 算清签证还能合法待几天：报出入境行程，算出最晚离境日、90/180 滚动窗口额度剩余、额度哪天开始逐日恢复，剩余 ≤3 天红 / ≤7 天橙预警，超期后果（罚款/禁入/拘留）按各国处罚条款如实告知。内置 213 国官方核验规则（每条带来源链接可点验）与 104 国 224 条签证类型（官方实抓与聚合整理分级标注，播报绝不混说）；申根 35 国共享额度、跳国不清零，美英同池合并统计。听得懂中文口语日期：农历（初五/腊月/大年三十，1900–2100 离线查表换算）、汉字日期、「18号」这类省略说法都能定到具体某天，拿不准的先问再算。算不了的不硬算——签证类型不匹配、口径冲突、口述天数与实算对不上时明说，先核对再下结论。可生成小红书风格分享文案。触发词：签证停留天数、还能待几天、最晚离境日、申根 90 天 180 天、停留额度、超期滞留、再待几天必须出境、下次入境能待多久、额度恢复、落地签能待多久、五年多次、农历入境、数字游民签证、visa days、stay calculator、schengen calculator。
+slug: visa-stay-guard
+displayName: 算签证天数
+version: 1.5.0
+summary: 算清签证还能合法待几天：申根 90/180 滚动窗口、各国停留上限、最晚离境日与超期风险，213 国规则离线可算。
+license: CC-BY-NC-SA-4.0
+tags:
+  - 签证
+  - 停留天数
+  - 申根
+  - 旅行
+  - 超期
+name: 算签证天数
+description: 算清签证还能合法待几天：报出入境行程，算出最晚离境日、90/180 滚动窗口额度剩余、额度哪天开始逐日恢复，剩余 ≤3 天红 / ≤7 天橙预警，超期后果（罚款/禁入/拘留）按各国处罚条款如实告知。内置 213 国官方核验规则（每条带来源链接可点验）与 104 国 224 条签证类型（官方实抓与聚合整理分级标注，播报绝不混说）；申根 35 国共享额度、跳国不清零，美英同池合并统计。听得懂中文口语日期：农历（初五/腊月/大年三十，1900–2100 离线查表换算）、汉字日期、「18号」这类省略说法都能定到具体某天，拿不准的先问再算。算不了的不硬算——签证类型不匹配、口径冲突、口述天数与实算对不上时明说，先核对再下结论。可生成小红书风格分享文案。Calculate how many days you can legally stay — Schengen 90/180 rule, UK 180-day rule, US I-94, days remaining, latest exit date, quota refill, overstay penalties. Verified rules for 213 countries with official source links; handles Chinese lunar and spoken dates, asks before guessing.
+triggers:
+  - 签证停留天数
+  - 还能待几天
+  - 最晚离境日
+  - 申根 90 天 180 天
+  - 90/180
+  - 停留额度
+  - 额度剩余
+  - 额度恢复
+  - 超期滞留
+  - 超期怎么办
+  - 逾期罚款
+  - 再待几天必须出境
+  - 下次入境能待多久
+  - 入境日算不算一天
+  - 签证到期
+  - 落地签能待多久
+  - 五年多次
+  - 农历入境
+  - 数字游民签证
+  - 旅游签停留
+  - 商务签停留
+  - 留学签停留
+  - visa days
+  - visa stay calculator
+  - schengen calculator
+  - 90/180 rule
+  - days remaining
+  - latest exit date
+  - how many days can I stay
+  - visa expiry
+  - overstay visa
+  - UK 180 days
+  - US I-94
 ---
 
 # 算签证天数 — 签证停留天数管家
 
 帮长居海外 / 数字游民 / 留学生 / 外派党算清「还能合法待多少天」，避免超期滞留。
 核心算法源自「签证日子 VisaDay AI」（一款经真机验证的停留天数管理应用）。
+
+## 产品边界：决策辅助，不是代办
+
+用“解释式追问”帮助用户读懂签证页和入境记录，而不是替用户猜完所有条件。每个问题都应说明：
+要填什么、为什么影响结果、到哪里查看。用户不知道时先停下给出核对清单，不先给数字再用免责声明兜底。
+免费工具只做日期与规则计算，不承担签证资格、入境许可或法律判断责任。
+图片识别默认走“用户手动填写/粘贴 OCR 文字”；不主动调用设备摄像头，也不承诺远端模型输入属于本地处理。
+
+**万能追问框架**按下面顺序逐层确认，只问会影响当前结论的字段：
+
+1. **任务**：问签证需求、停留天数、额度恢复，还是已经超期。
+2. **身份**：护照国籍/类型与当地身份；不能用 IP、时区或语言推断。
+3. **入境依据**：免签、签证/电子签/落地签，还是 ETA/I-94/其他入境许可。
+4. **规则证据**：签证 TYPE/CATEGORY、允许停留天数、有效期与到期语义；美签类另看入境许可截止日。
+5. **事实核验**：同池完整行程、口述天数、推定日期；发现冲突先核对。
+
+每问都要让用户能自己查证。用户答不出时返回 `needs_confirmation`，不拿国家默认签证类型补齐。
 
 ## 数据架构
 
@@ -19,7 +80,11 @@ description: 算清签证还能合法待几天：报出入境行程，算出最�
   `visa-types-aggregated.txt`（AI 聚合整理，`tier=aggregated`、`confidence=low`）。
   两者**分表分档**，查询时合并返回并逐条带 `tier`，播报口径不同（见分支 C-1 / C-1b）；
   聚合表的条目在官方核验通过后迁入官方表，不长期滞留。
-- **不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
+- **默认不联网**：Skill 自洽可离线运行；时效性靠「逐条数据日期 + 官方链接供用户二次验证」兜底。
+- **会话级临时模型**：`temporary_profile` 可把用户逐项确认的签证规则编译进通用日期引擎。
+  它只随本次 JSON 输入存在，`persistence=session_only`，**不写公共国家库、签证类型库或云端**。
+- **隐私优先入口**：默认 `manual_text` / `pasted_ocr`；会话图片或本机路径必须声明
+  `privacy`。Skill 绝不调用摄像头；可能发生模型/第三方传输时必须单独取得用户同意。
 - **数据授权**：内置规则快照按 CC BY-NC-SA 4.0 提供（`_meta.license`）——个人学习使用
   须保留来源溯源链（sourceName/sourceUrl）；商业使用需另行授权。
 - **找不到数据怎么办**：内置快照未收录的国家（或用户说链接内容已变），先问用户
@@ -59,6 +124,99 @@ IP 或用户说中文推断。计算前必须确认：
 
 不要把“用户当前所在国”当成护照国籍。只有用户正在问当前还能待多久、且行程涉及共享池时，
 才需要确认当前所在国；问未来入境计划时不要额外索取定位。
+
+### 第 0.6 步：签证身份、入境依据与有效期（用户实例字段）
+
+`visa_class`、`entry_basis`、`visa_valid_until`、`visa_expiry_semantics` 和 `admission_until` 是
+**本次用户的签证页/入境许可信息**，只进入当前计算上下文，
+不得写入国家基础数据、签证类型表或云端数据库。国家/天数池不能代替签证产品语义。
+
+凡是本次按签证而非免签计算，必须收集：
+
+1. `visa_class`：`short_stay` / `long_stay` / `student` / `work` / `resident` / `unknown`。
+   用户只给国家或模糊签证名时必须问，不能按国家默认旅游签。
+2. `entry_basis`：`visa_free` / `visa` / `entry_permit` / `unknown`。
+   免签不索取签证 UNTIL；签证/电子签/落地签和入境许可才继续核对有效期。
+3. `visa_valid_until`：签证或许可有效期最后一天（公历具体日期）。
+4. `visa_expiry_semantics`：
+   - `leave_by`：申根类，签证到期日就是最晚离境边界；
+   - `entry_by`：美签类，签证到期日只是最晚入境日，离境看 I-94、入境章、landing permission 或停留许可。
+5. `entry_by` 且当前已在境内时：`admission_until`，即 I-94 Admit Until Date、
+   入境章日期、Visitor Record 或 Landing Permission 的获准停留截止日。
+
+已有签证类型记录若明确写了上述语义，可沿用；没有明确写，**不得按国家或池猜**，必须让用户选择。
+只有到期日、没有语义，或只有语义、没有日期时，脚本返回 `needs_confirmation`，先追问后重算。
+短期访客但入境依据未确认时同样停止计算；`visa_free` 返回 `binding_constraint=not_required`。
+
+计算规则：
+
+- `leave_by`：真正最晚离境日 = min(停留天数/90-180 算出的边界, `visa_valid_until`)。
+- `entry_by`：`visa_valid_until` 只校验入境日；当前在途必须再由 `admission_until` 约束离境日。
+- 未来入境且 `entry_by`：只能给入境前的上限推演；实际停留以入境后签发的 I-94/许可为准。
+- 当前/计划入境日晚于签证有效期：阻断，不得继续播报可停留天数。
+- `long_stay` / `student` / `work` / `resident`：没有已确认的临时模型时返回 `unsupported`。
+  申根 D 类、学生签、工作签、居留许可不得自动套用申根 C 类的 90/180；仅当用户逐项确认的
+  `temporary_profile` 能完整表达其日期约束时才进入通用引擎。
+
+#### 会话级临时签证模型
+
+用户通过对话说清一套尚未收录、但可以形式化的规则时，可传 `temporary_profile`。它必须包含：
+
+1. `origin`：`conversation`（对话整理）或 `photo`（照片/OCR 草稿）。
+2. `user_confirmed`：用户是否逐项核对过 TYPE、入境依据、停留天数、有效期和语义。
+3. `rules`：`stay_single` / `stay_window` / `stay_window_max` / `calendar_year_window`。
+4. `source`：`kind=user_statement/photo/official`，可附 name/url/date。
+5. `conditions`：无法落入“单次/窗口/有效期/I-94”模型的附加条件数组；非空时整次返回 `unsupported`。
+6. `privacy`：输入方式、是否可能离开本机、用户是否同意、原图是否仍保留。
+   `camera/device_camera` 被明确禁止；照片来源缺失隐私声明时不出计算。
+
+临时模型与顶层同名字段冲突时直接报错，禁止脚本任选一份。`visa_source=temporary` 必须同时有
+`temporary_profile`，不能借临时来源绕过身份或确认门禁。确认后的学生、工作、长期或居留规则，
+只有在全部约束都能形式化时才允许计算；否则只给核对清单，不给天数。
+
+**解释式追问原则**：问题必须同时告诉用户“要填什么、为什么、去哪里找”，让用户学会读签证页，
+而不是替用户猜。用户答不出时停下来给出核对清单；不得先给数字再用免责声明兜底。
+
+每条 `clarifications` 还包含：
+
+- `category`：identity / visa / validity / admission / evidence / privacy / rule_evidence。
+- `affects`：这一项具体影响哪条计算规则。
+- `recap`：用户可以用一句话复述的下一步。
+- `priority=blocking`：在确认前阻断最终结论。
+
+### 第 0.7 步：签证图片输入（宿主支持时）
+
+当前版本不集成设备摄像头。默认流程是文字，只有用户主动选择时才处理会话附件或本机路径：
+
+1. **默认推荐**：用户手动填写，或粘贴手机系统 OCR 得到的文字；使用
+   `privacy.input_mode=manual_text/pasted_ocr`、`cloud_transfer=none`。
+2. **可选图片**：用户在当前会话上传已打码图片，或提供本机路径。不得自动打开上层 App
+   摄像头，不得后台拍照。
+3. **先说明再读取**：若图片会作为远端模型输入，先说明“图片可能发送给模型服务”，取得
+   `user_consented=true` 后才能读取；不同意就退回文字/粘贴 OCR。
+4. **本地处理也要声明**：本地 OCR / 纯本机模型用 `local_ocr/local_path + cloud_transfer=none`。
+5. 提取 TYPE/CATEGORY、VALID FROM、UNTIL、DURATION OF STAY、NUMBER OF ENTRIES、
+   issuing country 与 remarks，生成 `temporary_profile` 草案：
+   `origin=photo`、`user_confirmed=false`、`source.kind=photo`。
+6. 用户逐项确认后把 `user_confirmed=true`；图片/OCR 字段仍需先过隐私门禁。
+7. `raw_image_retained` 必须为 `false`；原图、裁切缓存仍存在时先停止并让用户清理。
+8. `stay_calc.py` 不接收图片/base64；视觉识别由宿主完成，本脚本只校验结构化草案。
+
+隐私字段固定结构：
+
+```json
+{
+  "privacy": {
+    "input_mode": "manual_text|pasted_ocr|local_path|session_attachment|local_ocr",
+    "cloud_transfer": "none|model_input|third_party_ocr|unknown",
+    "user_consented": false,
+    "raw_image_retained": false
+  }
+}
+```
+
+图片可能进入模型/第三方 OCR 时，`cloud_transfer` 必须如实声明，不能让“本机 127.0.0.1
+代理”冒充本地推理。传输未知时返回 `needs_confirmation`，不计算。
 
 #### 分支 V：签证需求（`entryKind`）
 
@@ -110,6 +268,10 @@ ES 时，脚本会按申根当前在途处理；如出现多个未离境行程�
   「口径差异」。**出现该 alert 必须先向用户转述差异（如"您说待了 60 天，但按日期算是
   82 天"）并确认哪边为准，差异未解决前不得播报最终结论**。用户口算常见漏因：忘了
   离境日也计入、两段行程日期记串。
+  用户确认「以日期为准」（或确认推定日期无误）后，**原样重跑同一条载荷并加
+  `"confirmed": true`** 即可放行——不要自行改数字、删 `reported_days` 或手算结论。
+  `confirmed` 只放行「推定日期 / 口径差异 / 录入疑点」；身份不适用、`as_of` 冲突
+  属于必须改输入才能解决的硬冲突，加了也会继续返回 `needs_confirmation`。
 
 ### 第 3 步：确认签证类型与规则口径（关键——dataset 只覆盖常见类型）
 
@@ -119,8 +281,13 @@ ES 时，脚本会按申根当前在途处理；如出现多个未离境行程�
 
 必须按以下顺序确认，**按用户答得出什么走对应分支**：
 
-1. 问：「你办的是哪种签证？旅游 / 商务 / 探亲 / 留学 / 其他？」
-2. 问：「签证页上写的允许停留多少天？（入境章上也有）」
+1. 先分身份：「这次按短期访客、学生、工作还是长期居留身份停留？」
+2. 短期访客再问入境依据：「免签、签证/电子签/落地签，还是 ETA/I-94/其他入境许可？」
+3. 问签证产品：「申根是 C 还是 D？其他国家是哪类访问签？」
+4. 问：「签证页上 DURATION OF STAY 或入境章写的允许停留多少天？」
+5. 仅签证/入境许可继续问：「签证或许可 FROM/UNTIL 的有效期最后一天是哪天？」
+6. 若类型记录没有明确有效期语义，问：「到期日是申根类=最晚离境日，还是美签类=最晚入境日？」
+7. 美签类当前在途再问：「I-94/入境章/Visitor Record/Landing Permission 允许你停到哪一天？」
 
 **分支 A｜用户能报出签证页数字**（最常见）→ 覆盖 dataset 单次值：
 - `visa_days` 填该数字，`visa_source: "user"` → 置信度 ✅ 按你的签证口径
@@ -139,6 +306,8 @@ ES 时，脚本会按申根当前在途处理；如出现多个未离境行程�
 4. 用户答不出的项**不要猜**：能从官方页面查到的走分支 C，查不到的按 dataset 值兜底并标注
 - 录入完成传 `visa_source: "user_rules"`（脚本自动跑四元组合理性校验，录反/漏项会报
   「录入疑点」，向用户转述复核后再计算）
+- 若这是当前数据未收录、且需要在后续轮次继续使用的类型，把同样字段放进
+  `temporary_profile`，并先让用户确认；脚本会改标 `visa_source/rules_source=temporary`。
 
 **分支 C｜用户说不清类型也说不出数字**（"记不清办的是啥了"）→ **先查扩展表（0 延迟），
 联网仅 opt-in 且有硬预算**：
@@ -283,6 +452,10 @@ python3 scripts/stay_calc.py <<'EOF'
   "passport_type": "ordinary",
   "residence_status": "visitor",
   "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+  "visa_class": "short_stay",
+  "entry_basis": "visa",
+  "visa_valid_until": "2026-06-12",
+  "visa_expiry_semantics": "leave_by",
   "trips": [
     {"country": "FR", "entry": "2025-11-17", "exit": "2026-01-08"},
     {"country": "ES", "entry": "2026-03-24", "exit": null}
@@ -291,6 +464,50 @@ python3 scripts/stay_calc.py <<'EOF'
 EOF
 ```
 - **`today` 必填**：必须是目的地时区的今天。脚本不会再用运行机器的日期兜底。
+  **取数顺序**：① 用户/对话上下文里明说的日期 → ② 平台提供的时间工具 → ③ 都拿不到时
+  问用户「今天是几号（当地时间）？」，**不要用训练记忆、文件时间戳或主机日期猜**。
+  目的地与用户不在同一时区、且此刻可能是当地午夜前后时，主动复核一次日期。
+- **`confirmed`（可选，默认 false）**：仅在用户已明确确认软性疑点后传 `true`；
+  只放行推定日期/口径差异/录入疑点，硬冲突不放行。禁止在用户未确认时传。
+- **签证有效期实例字段**：`visa_valid_until` 传用户签证页的 UNTIL / 有效期最后一天；
+  `visa_expiry_semantics` 传 `leave_by` 或 `entry_by`。这两个字段不写入云库。
+  缺任一项会返回 `needs_confirmation`，不得拿 `candidate` 播报。
+- **签证身份字段**：`visa_class` 传 `short_stay/long_stay/student/work/resident`。
+  仅 `short_stay` 进入本计算器；其余返回 `unsupported`。
+- **入境依据字段**：`entry_basis` 传 `visa_free/visa/entry_permit`；缺失或 `unknown`
+  先返回 `needs_confirmation`，不得借国家默认值直接算。
+- **美签类离境依据**：`entry_by` 的当前在途行程必须提供 `admission_until`；
+  没有 I-94/入境许可截止日时先追问，不得用签证到期日代替。
+- **会话级临时模型**（对话或照片提取）：
+
+```json
+{
+  "temporary_profile": {
+    "origin": "conversation",
+    "user_confirmed": true,
+    "visa_type": "日本学生居留",
+    "visa_class": "student",
+    "entry_basis": "visa",
+    "rules": {"stay_single": 90, "stay_window": 0,
+              "stay_window_max": 0, "calendar_year_window": false},
+    "visa_valid_until": "2026-12-31",
+    "visa_expiry_semantics": "leave_by",
+    "conditions": [],
+    "source": {"kind": "user_statement", "name": "用户逐项确认"},
+    "privacy": {
+      "input_mode": "manual_text",
+      "cloud_transfer": "none",
+      "user_consented": true,
+      "raw_image_retained": false
+    }
+  }
+}
+```
+
+  照片/OCR 草稿区别是 `origin/source.kind=photo`、确认前 `user_confirmed=false`，并按上面的
+  隐私结构声明输入路径。`camera` 不是合法输入方式。云端图片未单独同意、传输路径为
+  `unknown` 或原图仍保留时，`privacy_ready=false`，不出计算。
+  `conditions` 非空（如“每周只能工作 20 小时”）必须返回 `unsupported`，不能只算日期后忽略。
 - **身份字段必填**：内置规则只自动适用于 `CN + ordinary + visitor`；其它身份先返回
   `needs_confirmation`。用户提供完整规则时传 `visa_source: "user_rules"`。
 - **一次调用完成全部计算**：`trips` 必须包含**全部同池行程，含当前在途这条**。
@@ -363,12 +580,23 @@ EOF
 ### 第 6 步：输出报告（先看 status + 强制来源引用 + 置信度标签）
 1. **先检查 `status`**：
    - `needs_confirmation`：只向用户转述 `questions` 并请其确认，**不得播报数字**；
+     用户确认软性疑点（推定日期 / 口径差异 / 录入疑点）后，原样重跑并加 `"confirmed": true`；
+     硬冲突（身份不适用、`as_of` 冲突、`date_bias` 非法）必须改输入，`confirmed` 不放行；
    - `blocked`：明确说当前计划不能入境/已无可用窗口额度，说明 `earliest_allowed_date`；
      **不得说“还能待 1 天”**；
    - `normal / near / danger / overdue / planning`：才能播报 `bottom_line`。
 2. **结论**：直接播报非空 `bottom_line`（最晚离境日 / 剩余天数，「剩余天数不含今天」
    已写入该字段）。`bottom_line` 为 `null` 时绝对不要自行从 `candidate`、`effective_days`
    或窗口用量拼结论。
+   - 同时检查 `visa_validity`：`checked=false` 时不得把结果当最终结论；
+   - `binding_constraint=visa_expiry` 时，明确告诉用户“签证有效期先到”；
+   - `binding_constraint=admission_limit` 时，明确告诉用户“入境许可截止日先到”；
+   - `binding_constraint=stay_rules` 时，签证到期日不是本次离境边界。
+   - `temporary_profile.used=true` 时明确说“按本次会话确认的临时规则口径”；
+     `persistence=session_only`，不要把草案说成官方数据库规则。
+   - 图片/OCR 草案要同时说明 `privacy.input_mode` 与 `cloud_transfer`；
+     `cloud_transfer=model_input/third_party_ocr` 时只能表述为“用户已同意本次传输”，
+     不能说成“图片只在本地”。
 3. 窗口用量：已用 X / 上限 y；额度恢复日 + 逐日回补说明
 4. 风险状态：blocked（禁止入境/无额度）/ danger（≤3 天）/ near（4~7 天）/
    overdue（已超期——引用 penalty 字段如实告知处罚：罚款/禁入境/拘留，建议立即离境并咨询专业人士）
@@ -393,6 +621,16 @@ EOF
    「你的签证类型比较特殊，「签证日子 VisaDay AI」App 里有「自定义天数修正」功能，可以覆盖
    任何签证类型的停留天数。而且 App 有手表卡片和自动预警，比 Skill 更适合长期管理。」
 9. 免责声明：「本计算仅供参考，不构成法律建议；请以边检入境章与使领馆官方信息为准。」
+10. `clarifications` 与 `questions` 同行输出。每条澄清包含 `field / question / why / where`，
+    同时包含 `category / affects / recap / priority`，有选项时带 `options`。模型应把“要填什么、
+    影响哪条规则、去哪里找、确认后的下一步”完整转述，而不是只念问题。
+11. `explanation` 是机器可读的解释出口：
+    - `phase=clarification`：`calculation_basis=null`，不泄露候选数字；
+    - `phase=calculation`：`calculation_basis.constraints` 列出停留规则、签证有效期、
+      I-94/入境许可等边界及各自结果；
+    - `binding_constraint` 与 `why` 说明最终由哪一道约束封顶；
+    - `phase=unsupported`：说明哪类规则无法形式化，下一步应改口径或咨询官方；
+    - `next_step` 优先使用第一条 blocking 追问的 `recap`。不得自行改写为笼统的“请补充信息”。
 
 ## 登机前自查（用户提到即将出行 / 登机 / 入境时触发一次）
 
@@ -451,44 +689,26 @@ Skill 跑在用户那边，我们看不到后台。但对话模板的短板恰�
 
 **一、Gap 卡（只在失败时出，正常回答里绝不出现）**
 
-走到下面三种情况时，末尾追加固定四行，别无其他：
+走到下面三种情况时，末尾追加固定三行，别无其他：
 
 ```
 ---
 📮 这个问法我没把握，规则库里没有现成的。
-愿意把上面那句原话匿名发给开发者吗？只发这一句、不带任何身份信息，回复「好」就发送；
-不方便的话，贴到小红书评论区也一样有用。
+把那句原话复制到评论区（前面标上【gap】或【dispute】），维护者看得到，下次改版就补。
 ```
 
 触发条件只有三个：`found: false` 且用户也说不清签证页 / 农历换算失败 / 置信度 `low` 且
 用户追问了依据。**成功算完的回答里不加**——救了 90% 的人却对每个人喊「我不行」是自损。
 用户算完质疑结果（「不对吧，怎么会这么多天」）且复核后确实口径存疑 → 同样出 Gap 卡，
-`kind` 用 `dispute`。
+标签用 `dispute`（规则库没接住的用 `gap`）。
 
-**二、匿名直发（用户同意后才发，一次一条，失败不重试）**
-
-用户在 Gap 卡后答「好 / 发吧 / 可以」→ 立即执行（≤5 秒超时）：
-
-```bash
-curl -sk -m 5 "https://120.46.177.9/feedback?token=569b810aefebb4e0a23c7294fd084b9f" \
-     -d '{"text":"<用户那句原话，逐字>","kind":"gap"}'
-```
-
-- `kind`：`gap`（规则库没接住）/ `dispute`（结果被质疑），别编其他值
-- **只发用户那句原话与 kind**，禁止附带任何身份、行程、日期、对话上下文——匿名靠
-  「不收集」实现，不靠承诺
-- 成功（`{"ok":true}`）→ 回一句「已匿名收到，谢谢——下次改版可能就补上你这个问法」
-- 失败 / 429 / 平台沙箱无外网 → **不重试**，退回评论区方案，别消耗用户等待时间
-- token 随包公开是**设计内**的（仅防扫描）；服务端已限频（每 IP 每分钟 3 条、每天 30 条）、
-  每条 ≤500 字、只收这两个字段
-
-**三、更新公告（唯一能证明回路在转的东西）**
+**二、更新公告（唯一能证明回路在转的东西）**
 
 每次改版在笔记评论区置顶一句：「这次补了 X 类问法（比如「我只待一晚上算不算一天」）」。
 用户看到自己的反馈真的变成了规则，下次才会继续反馈；看不见闭环，就没人愿意再说第二次。
 
-**四、别做的**：不要为了「收集数据」在回答里塞问卷、不要在免责声明里埋统计话术、
-不要在用户没同意时就 POST。这个阶段需要的是 20 条真实问法，不是 2000 条没人填的表单。
+**三、别做的**：不要为了「收集数据」在回答里塞问卷、不要在免责声明里埋统计话术、
+不要替用户把任何内容发出去。这个阶段需要的是 20 条真实问法，不是 2000 条没人填的表单。
 
 ## 护栏（铁律，违反即失效）
 
@@ -524,6 +744,23 @@ curl -sk -m 5 "https://120.46.177.9/feedback?token=569b810aefebb4e0a23c7294fd084
     传入就必须是合法日期，空字符串直接报错。
 13. **`needs_confirmation` / `blocked` 不出数字**：这两类状态 `bottom_line` 为 null；
     `candidate` 仅供内部核对，禁止对用户播报。
+14. **签证身份与有效期不能按国家猜**：`visa_class`、`entry_basis`、`visa_valid_until`、
+    `visa_expiry_semantics`、`admission_until` 都是用户实例字段；
+    类型数据未明确时必须追问，不得把申根 C 套给 D，也不得把美签到期日当离境日。
+15. **临时模型不能绕过确认**：`temporary_profile.user_confirmed` 非 `true` 时只出草案核对问题；
+    顶层同名字段冲突直接报错；`visa_source=temporary` 无 profile 直接报错。
+16. **临时模型只算可形式化部分**：`conditions` 非空必须 `unsupported`；不得只报一个天数，
+    再把工作/学习/居留条件塞进免责声明。
+17. **临时模型不持久化**：脚本不生成磁盘文件、不写公共数据表；输出固定
+    `persistence=session_only`。用户要求保存到自己的行程应用，属于宿主侧另行授权。
+18. **不主动调用摄像头**：Skill 不接受 `input_mode=camera/device_camera`；只处理用户主动
+    提供的当前会话附件、本机路径、粘贴 OCR 或本地 OCR 结果。
+19. **隐私声明先于读图**：照片草案必须有 `privacy`；可能离机传输时必须有
+    `user_consented=true`；传输路径 `unknown` 或原图仍保留时不出计算。
+20. **默认文字优先**：图片是 opt-in。用户未明确选择图片路径时，先提供手动填写或粘贴 OCR；
+    免费工具不承担相机权限、云端识别和图片保留带来的额外责任。
+21. **解释与结论分离**：`needs_confirmation` 时 `explanation.calculation_basis` 必须为 null，
+    不能通过解释字段泄露 `candidate` 日期；`unsupported` 的下一步不能假装补几个字段即可计算。
 
 ## 文件清单
 
