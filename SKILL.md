@@ -1,7 +1,7 @@
 ---
 slug: visa-stay-guard
 displayName: 算签证天数
-version: 1.5.0
+version: 1.5.1
 summary: 算清签证还能合法待几天：申根 90/180 滚动窗口、各国停留上限、最晚离境日与超期风险，213 国规则离线可算。
 license: CC-BY-NC-SA-4.0
 tags:

@@ -1412,6 +1412,8 @@ def run(payload):
                 elif last_allowed is None or admission_until < last_allowed:
                     last_allowed = admission_until
                     binding_constraint = 'admission_limit'
+        if last_allowed is not None:
+            stay_days = max((last_allowed - entry).days + 1, 0)
         blocked = stay_days == 0
         overdue = bool(last_allowed and today > last_allowed)
         remaining = max((last_allowed - today).days, 0) if last_allowed else 0
@@ -1501,6 +1503,8 @@ def run(payload):
             out['visa_validity']['binding_constraint'] = 'not_required'
         elif visa_expiry_semantics is not None and visa_valid_until is not None:
             out['visa_validity']['binding_constraint'] = 'stay_rules'
+        if last_allowed is not None:
+            stay_days = max((last_allowed - as_of).days + 1, 0)
         blocked = stay_days == 0
         out['single'] = {
             'entry': as_of.isoformat(),

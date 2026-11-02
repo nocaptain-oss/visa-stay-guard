@@ -205,6 +205,8 @@ check("V12b 真正边界=I-94 截止日",
 check("V12c binding=admission_limit",
       o["visa_validity"]["binding_constraint"] == "admission_limit",
       str(o["visa_validity"]))
+check("V12d I-94 封顶后有效天数=2（6/12–6/13）",
+      o["single"]["effective_days"] == 2, str(o["single"]))
 
 # V13：完全不给签证身份时，不得借用国家默认值直接计算
 o = run({
@@ -264,6 +266,53 @@ check("V16b 结论标明入境后以 I-94 为准",
 check("V16c 同时给出解释性告警",
       any("未来尚未入境" in a and "最长停留上限" in a for a in o["alerts"]),
       str(o["alerts"]))
+
+# V17：计划入境时签证有效期先到，天数必须按实际起止日重算
+o = run({
+    "country": "ES",
+    "today": "2026-11-02",
+    "as_of": "2026-11-02",
+    "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+    "visa_class": "short_stay",
+    "entry_basis": "visa",
+    "visa_valid_until": "2026-11-15",
+    "visa_expiry_semantics": "leave_by",
+    "trips": [
+        {"country": "ES", "entry": "2026-07-02", "exit": "2026-07-25"},
+        {"country": "ES", "entry": "2026-08-07", "exit": "2026-09-10"},
+        {"country": "ES", "entry": "2026-10-15", "exit": "2026-10-23"},
+    ],
+})
+check("V17a 未封顶规则仍为 11/23",
+      o["single"]["stay_limit_last_allowed_day"] == "2026-11-23",
+      str(o["single"]))
+check("V17b 真正边界=签证 11/15",
+      o["single"]["last_allowed_day"] == "2026-11-15",
+      str(o["single"]))
+check("V17c 配额边界虽为 22 天，实际只能待 14 天",
+      o["single"]["effective_days"] == 14
+      and o["single"]["remaining_days"] == 14, str(o["single"]))
+check("V17d 结论播报 14 天",
+      "可待 14 天" in (o["bottom_line"] or ""), str(o["bottom_line"]))
+
+# V18：当前在途被签证有效期截断时也按实际起止日重算
+o = run({
+    "country": "ES",
+    "today": "2026-06-14",
+    "rules": {"stay_single": 90, "stay_window": 180, "stay_window_max": 90},
+    "visa_class": "short_stay",
+    "entry_basis": "visa",
+    "visa_valid_until": "2026-06-20",
+    "visa_expiry_semantics": "leave_by",
+    "trips": [{"country": "ES", "entry": "2026-06-12", "exit": None}],
+})
+check("V18a 有效天数=6/12–6/20 共 9 天",
+      o["single"]["effective_days"] == 9, str(o["single"]))
+check("V18b 剩余 6 天（不含今天）",
+      o["single"]["remaining_days"] == 6, str(o["single"]))
+check("V18c binding=visa_expiry",
+      o["visa_validity"]["binding_constraint"] == "visa_expiry",
+      str(o["visa_validity"]))
 
 print(f"\n{len(fails)} 失败")
 sys.exit(1 if fails else 0)
